@@ -14,7 +14,7 @@
 python -m kanban --db <数据库路径> project-create <项目名称>
 python -m kanban --db <数据库路径> task-create <项目标识> <任务标题>
 python -m kanban --db <数据库路径> task-move <任务标识> <todo|doing|done>
-python -m kanban --db <数据库路径> task-list <项目标识>
+python -m kanban --db <数据库路径> task-list <项目标识> [--status <todo|doing|done>]
 ```
 
 - 数据库文件不存在时，首次成功操作会自动创建；多个进程使用同一路径可共享数据。

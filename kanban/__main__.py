@@ -4,7 +4,8 @@
   project-create <项目名称>           创建项目，输出 {"id", "name"}
   task-create <项目标识> <任务标题>   在已有项目下创建任务（初始状态 todo）
   task-move <任务标识> <状态>         在 todo/doing/done 之间移动任务
-  task-list <项目标识>                按任务标识升序列出项目全部任务
+  task-list <项目标识> [--status <todo|doing|done>]
+      按任务标识升序列出项目任务，可按单一状态精确筛选
 
 退出码：0 成功；2 参数或业务校验失败；1 存储（数据库）失败。
 """
@@ -136,13 +137,26 @@ def cmd_task_move(conn, args):
 
 def cmd_task_list(conn, args):
     project_id = parse_positive_int(args.project_id, "project id")
+    status = args.status
+    if status is not None and status not in VALID_STATUSES:
+        usage_error(
+            f"invalid status {status!r}; expected one of: "
+            + ", ".join(VALID_STATUSES)
+        )
     try:
         require_project(conn, project_id)
-        rows = conn.execute(
-            "SELECT id, project_id, title, status FROM tasks "
-            "WHERE project_id = ? ORDER BY id ASC",
-            (project_id,),
-        ).fetchall()
+        if status is None:
+            rows = conn.execute(
+                "SELECT id, project_id, title, status FROM tasks "
+                "WHERE project_id = ? ORDER BY id ASC",
+                (project_id,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, project_id, title, status FROM tasks "
+                "WHERE project_id = ? AND status = ? ORDER BY id ASC",
+                (project_id, status),
+            ).fetchall()
     except sqlite3.Error as exc:
         storage_error(str(exc))
     emit([task_object(row) for row in rows])
@@ -171,6 +185,10 @@ def build_parser():
 
     p = sub.add_parser("task-list", help="列出项目任务")
     p.add_argument("project_id", help="项目标识（正整数）")
+    p.add_argument(
+        "--status",
+        help="可选状态筛选：todo / doing / done；省略时返回全部任务",
+    )
     p.set_defaults(func=cmd_task_list)
 
     return parser
