@@ -4,7 +4,8 @@
   project-create <项目名称>           创建项目，输出 {"id", "name"}
   task-create <项目标识> <任务标题>   在已有项目下创建任务（初始状态 todo）
   task-move <任务标识> <状态>         在 todo/doing/done 之间移动任务
-  task-list <项目标识> [--status 状态] 按任务标识升序列出项目任务，可按状态筛选
+  task-list <项目标识> [--status 状态] [--query 关键词]
+      按任务标识升序列出项目任务，可按状态和标题关键词（大小写敏感的连续子串）筛选
 
 退出码：0 成功；2 参数或业务校验失败；1 存储（数据库）失败。
 """
@@ -136,26 +137,33 @@ def cmd_task_move(conn, args):
 
 def cmd_task_list(conn, args):
     project_id = parse_positive_int(args.project_id, "project id")
+    query = args.query
+    if query is not None:
+        query = query.strip()
+        if not query:
+            usage_error("query keyword must not be empty")
     status = args.status
     if status is not None and status not in VALID_STATUSES:
         usage_error(
             f"invalid status {status!r}; expected one of: "
             + ", ".join(VALID_STATUSES)
         )
+    clauses = ["project_id = ?"]
+    params = [project_id]
+    if status is not None:
+        clauses.append("status = ?")
+        params.append(status)
+    if query is not None:
+        # INSTR 为大小写敏感的连续子串匹配，%、_、引号等均按普通字符处理
+        clauses.append("INSTR(title, ?) > 0")
+        params.append(query)
     try:
         require_project(conn, project_id)
-        if status is None:
-            rows = conn.execute(
-                "SELECT id, project_id, title, status FROM tasks "
-                "WHERE project_id = ? ORDER BY id ASC",
-                (project_id,),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT id, project_id, title, status FROM tasks "
-                "WHERE project_id = ? AND status = ? ORDER BY id ASC",
-                (project_id, status),
-            ).fetchall()
+        rows = conn.execute(
+            "SELECT id, project_id, title, status FROM tasks "
+            "WHERE " + " AND ".join(clauses) + " ORDER BY id ASC",
+            params,
+        ).fetchall()
     except sqlite3.Error as exc:
         storage_error(str(exc))
     emit([task_object(row) for row in rows])
@@ -187,6 +195,10 @@ def build_parser():
     p.add_argument(
         "--status",
         help="可选状态筛选：todo / doing / done；省略时返回全部任务",
+    )
+    p.add_argument(
+        "--query",
+        help="可选标题关键词：去除首尾空白后按大小写敏感的连续子串匹配标题",
     )
     p.set_defaults(func=cmd_task_list)
 
