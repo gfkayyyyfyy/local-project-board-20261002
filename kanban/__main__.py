@@ -2,6 +2,7 @@
 
 子命令：
   project-create <项目名称>           创建项目，输出 {"id", "name"}
+  project-list                        按项目标识升序列出全部项目，输出 [{"id", "name"}]
   task-create <项目标识> <任务标题>   在已有项目下创建任务（初始状态 todo）
   task-move <任务标识> <状态>         在 todo/doing/done 之间移动任务
   task-list <项目标识> [--status 状态] [--query 关键词]
@@ -102,6 +103,18 @@ def cmd_project_create(conn, args):
     emit({"id": cur.lastrowid, "name": name})
 
 
+def cmd_project_list(conn, args):
+    # 只读查询：名称按保存原值返回（含重名、中文、引号与内部空白），
+    # 按项目标识数值升序；没有项目时返回 []
+    try:
+        rows = conn.execute(
+            "SELECT id, name FROM projects ORDER BY id ASC"
+        ).fetchall()
+    except sqlite3.Error as exc:
+        storage_error(str(exc))
+    emit([{"id": row[0], "name": row[1]} for row in rows])
+
+
 def require_project(conn, project_id):
     row = conn.execute(
         "SELECT id FROM projects WHERE id = ?", (project_id,)
@@ -196,6 +209,9 @@ def build_parser():
     p = sub.add_parser("project-create", help="创建项目")
     p.add_argument("name", help="项目名称")
     p.set_defaults(func=cmd_project_create)
+
+    p = sub.add_parser("project-list", help="列出全部项目")
+    p.set_defaults(func=cmd_project_list)
 
     p = sub.add_parser("task-create", help="创建任务")
     p.add_argument("project_id", help="目标项目标识（正整数）")
