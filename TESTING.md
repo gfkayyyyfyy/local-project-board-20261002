@@ -70,3 +70,32 @@ python3 -m unittest test_id_boundary -v
   原任务标题/状态/所属项目/标识不变（含 `task-move <上限+1> doing`
   被拒绝后 `task-list 1` 中任务仍为 todo 的端到端场景）。
 - 数据库无法打开时仍为退出码 1 的存储失败协议。
+
+# task-rename 改名回归测试
+
+`test_task_rename.py` 针对 `task-rename <任务标识> <新标题>`，数据准备、
+改名与结果核对全部经公开命令完成（`project-create` / `task-create` /
+`task-move` / `task-rename` / `task-list`），不直接操作数据库：
+
+```bash
+python3 test_task_rename.py
+python3 -m unittest test_task_rename -v
+python3 test_task_rename.py \
+    TaskRenameRegression.test_rename_persists_saved_title
+```
+
+- 成功路径：在两个项目中准备同标题任务（目标项目另有一条同标题任务），
+  目标任务置为 doing 后用带前导零的同值标识改名为 `"  修复  API_100%'  "`；
+  退出码 0、stderr 为空、stdout 为只含 `id` / `project_id` / `title` /
+  `status` 的单个 JSON 对象；保存标题为 `修复  API_100%'`（首尾空白去除，
+  内部双空格、大小写、中文、`%`、`_`、单引号原样保留），标识、项目与
+  doing 状态不变；其他任务的完整对象、数量与标识排序不变；按新标题
+  关键词筛选能命中它，按旧标题筛选只剩未改名任务。
+- 仅首尾空白不同的同一标题再次提交仍成功，返回同一任务且不新增记录；
+  改成另一条任务的标题也成功（允许重名）。
+- 拒绝路径：空字符串或纯空白标题、缺少必要参数、任务标识为 0 / 负数 /
+  非数字 / `9223372036854775808` / 范围内不存在的标识，均退出码 2、
+  stdout 为空、stderr 说明原因，两个项目的任务完整列表不变；数据库路径
+  指向已有目录时退出码 1 并说明存储失败。
+- 不依赖 JSON 键序或错误文案逐字拼写；失败时打印输入、退出码、stdout、
+  stderr 及预期与实际差异。
