@@ -18,6 +18,10 @@ import sys
 
 VALID_STATUSES = ("todo", "doing", "done")
 
+# SQLite INTEGER（有符号 64 位）可存储的最大正整数
+SQLITE_MAX_INT = 9223372036854775807
+_SQLITE_MAX_INT_DIGITS = str(SQLITE_MAX_INT)
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS projects (
     id   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,12 +51,25 @@ def storage_error(message):
 
 
 def parse_positive_int(raw, what):
-    if not _POSITIVE_INT.fullmatch(raw):
+    """把 ASCII 数字拼写的标识解析为正整数。
+
+    允许前导零，并按数值而非原始字符串长度判断边界：去掉前导零后与 SQLite
+    有符号 64 位整数上限按位数和字典序比较，因此即使输入五千个零或五千个 9
+    也不会触发 Python 大整数转换（3.11+ 对超长数字字符串有限制）。
+    """
+    if not isinstance(raw, str) or not _POSITIVE_INT.fullmatch(raw):
         usage_error(f"{what} must be a positive integer, got {raw!r}")
-    value = int(raw)
-    if value < 1:
+    digits = raw.lstrip("0") or "0"
+    if digits == "0":
         usage_error(f"{what} must be a positive integer, got {raw!r}")
-    return value
+    if (len(digits) > len(_SQLITE_MAX_INT_DIGITS)
+            or (len(digits) == len(_SQLITE_MAX_INT_DIGITS)
+                and digits > _SQLITE_MAX_INT_DIGITS)):
+        usage_error(
+            f"{what} is out of the supported range "
+            f"(1..{SQLITE_MAX_INT}), got {raw!r}"
+        )
+    return int(digits)
 
 
 def connect(db_path):
