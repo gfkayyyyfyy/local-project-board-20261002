@@ -18,6 +18,11 @@ import sys
 
 VALID_STATUSES = ("todo", "doing", "done")
 
+# SQLite INTEGER 的上界（2^63-1）：超过它的整数无法作为标识绑定，
+# 必须在访问数据库之前按参数错误（退出码 2）拒绝。
+SQLITE_MAX_INT = 9223372036854775807
+_SQLITE_MAX_INT_DIGITS = str(SQLITE_MAX_INT)
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS projects (
     id   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,7 +54,21 @@ def storage_error(message):
 def parse_positive_int(raw, what):
     if not _POSITIVE_INT.fullmatch(raw):
         usage_error(f"{what} must be a positive integer, got {raw!r}")
-    value = int(raw)
+    # 允许任意前导零，按数值而非原始字符串长度判断边界：先去掉前导零再比较，
+    # 避免对超长数字串调用 int()（Python 3.11+ 有位数转换限制）。
+    digits = raw.lstrip("0") or "0"
+    if (
+        len(digits) > len(_SQLITE_MAX_INT_DIGITS)
+        or (
+            len(digits) == len(_SQLITE_MAX_INT_DIGITS)
+            and digits > _SQLITE_MAX_INT_DIGITS
+        )
+    ):
+        usage_error(
+            f"{what} is out of supported range "
+            f"(maximum {SQLITE_MAX_INT}), got {raw!r}"
+        )
+    value = int(digits)
     if value < 1:
         usage_error(f"{what} must be a positive integer, got {raw!r}")
     return value
