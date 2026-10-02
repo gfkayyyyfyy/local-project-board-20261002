@@ -99,3 +99,34 @@ python3 test_task_rename.py \
   指向已有目录时退出码 1 并说明存储失败。
 - 不依赖 JSON 键序或错误文案逐字拼写；失败时打印输入、退出码、stdout、
   stderr 及预期与实际差异。
+
+# task-create 创建任务回归测试
+
+`test_task_create.py` 针对 `task-create <项目标识> <任务标题>`，数据准备、
+创建与结果核对全部经公开命令完成（`project-create` / `task-move` /
+`task-list`），不直接操作数据库：
+
+```bash
+python3 test_task_create.py
+python3 -m unittest test_task_create -v
+python3 -m unittest discover -p 'test_task_create.py' -v
+python3 test_task_create.py \
+    TaskCreateRegression.test_create_returns_json_object_and_persists
+```
+
+- 成功路径（两个项目）：标题 `"  整理  API_100%'  "` 保存为
+  `整理  API_100%'`（只去首尾空白，内部双空格、中文、大小写、`%`、`_`、
+  单引号原样保留）；退出码 0、stderr 为空、stdout 为只含 `id` /
+  `project_id` / `title` / `status` 的单个 JSON 对象，id 为正整数、
+  所属项目正确、状态 todo；由独立命令进程 `task-list` 查询同一数据库，
+  任务与创建结果一致且不串入另一项目；重复提交同标题保留两条不同标识、
+  按 id 升序；另一项目建新任务 id 仍唯一；已有任务移到 doing 后再创建，
+  新任务 todo、已有任务完整内容不变；项目 1 存在时 `0001` 与 `1` 等价。
+- 拒绝路径：空字符串或纯空白标题、缺少必要参数、项目标识为 0 / 负数 /
+  非数字 / `9223372036854775808` / 范围内不存在的值，均退出码 2、
+  stdout 为空、stderr 说明原因；上限值本身按项目是否存在处理，不误判
+  为越界；失败前后项目与任务列表完全相同（含 `project-list` 快照）。
+- 存储失败：有效参数配合指向已有目录的 `--db` 为退出码 1、stdout 为空、
+  stderr 说明 `storage failure`，且不污染既有临时库。
+- 不依赖 JSON 键序或错误文案逐字拼写；失败时打印命令行输入、实际退出码、
+  stdout、stderr 及预期差异。
