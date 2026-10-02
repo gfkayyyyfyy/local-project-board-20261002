@@ -12,6 +12,7 @@
 
 ```bash
 python -m kanban --db <数据库路径> project-create <项目名称>
+python -m kanban --db <数据库路径> project-list
 python -m kanban --db <数据库路径> task-create <项目标识> <任务标题>
 python -m kanban --db <数据库路径> task-move <任务标识> <todo|doing|done>
 python -m kanban --db <数据库路径> task-list <项目标识> [--status <todo|doing|done>] [--query <关键词>]
@@ -20,6 +21,7 @@ python -m kanban --db <数据库路径> task-list <项目标识> [--status <todo
 - 数据库文件不存在时，首次成功操作会自动创建；多个进程使用同一路径可共享数据。
 - 项目与任务使用稳定的正整数标识，任务标识在同一数据库内跨项目唯一。
 - 名称与标题保存前去除首尾空白，允许重名；新任务初始状态为 `todo`。
+- `project-list` 返回数据库中全部项目（含尚无任务的项目），每个项目只含 `id` 与 `name`，按 `id` 数值升序；同名项目各自保留，名称按已保存的值原样返回；查询不改动任何数据。
 - `task-list` 可附加 `--status todo|doing|done` 只返回该项目中匹配状态的任务，按原样拼写精确匹配；省略时返回项目全部任务。
 - `task-list` 可附加 `--query 关键词`，只返回标题包含该关键词的任务：关键词先去除首尾空白（内部空白保留），再按大小写敏感的连续子串匹配，不分词、不归一化，`%`、`_`、引号均为普通字符，且只匹配标题；可与 `--status` 同时使用，两个条件取交集。
 - 成功时退出码为 0，标准输出为单个 JSON 值（对象或数组），标准错误为空。
