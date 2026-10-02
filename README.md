@@ -14,12 +14,13 @@
 python -m kanban --db <数据库路径> project-create <项目名称>
 python -m kanban --db <数据库路径> task-create <项目标识> <任务标题>
 python -m kanban --db <数据库路径> task-move <任务标识> <todo|doing|done>
-python -m kanban --db <数据库路径> task-list <项目标识>
+python -m kanban --db <数据库路径> task-list <项目标识> [--status <todo|doing|done>]
 ```
 
 - 数据库文件不存在时，首次成功操作会自动创建；多个进程使用同一路径可共享数据。
 - 项目与任务使用稳定的正整数标识，任务标识在同一数据库内跨项目唯一。
 - 名称与标题保存前去除首尾空白，允许重名；新任务初始状态为 `todo`。
+- `task-list` 可附加 `--status todo|doing|done` 只返回该项目中匹配状态的任务，按原样拼写精确匹配；省略时返回项目全部任务。
 - 成功时退出码为 0，标准输出为单个 JSON 值（对象或数组），标准错误为空。
 - 参数缺失、名称/标题为空、标识非正整数、项目或任务不存在、状态非法时，退出码为 2，标准错误说明原因，数据不变。
 - 数据库无法打开或文件不可用时，退出码为 1，标准错误说明存储失败。
