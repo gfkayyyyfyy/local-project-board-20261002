@@ -70,3 +70,27 @@ python3 -m unittest test_id_boundary -v
   原任务标题/状态/所属项目/标识不变（含 `task-move <上限+1> doing`
   被拒绝后 `task-list 1` 中任务仍为 todo 的端到端场景）。
 - 数据库无法打开时仍为退出码 1 的存储失败协议。
+
+# task-rename 任务改名回归测试
+
+`test_task_rename.py` 针对 `task-rename` 的改名保存、隔离性与拒绝路径，
+运行方式同上：
+
+```bash
+python3 test_task_rename.py
+python3 -m unittest test_task_rename -v
+python3 test_task_rename.py \
+    TaskRenameRegression.test_rename_success_persists_and_isolates
+```
+
+- 成功路径：两个项目中各准备同标题任务（目标项目另有一条同标题任务），
+  目标任务置为 `doing` 后用带前导零的同值标识改名为
+  `"  修复  API_100%'  "`；验证保存标题为 `修复  API_100%'`（内部双空格、
+  大小写、中文、`%`、`_`、单引号原样保留），标识、所属项目与状态不变，
+  其他任务完整对象、任务数量与标识排序不变；按新标题关键词能查到它，
+  按旧标题只剩未改名任务。仅首尾空白不同的重复提交仍成功且不新增记录；
+  改成另一条任务的标题也成功（允许重名）。
+- 拒绝路径：空字符串/纯空白新标题、缺少必要参数、任务标识为 0、负数、
+  非数字、超上限（9223372036854775808）或范围内不存在的标识，均退出码
+  2、标准输出为空、标准错误说明原因，两个项目的任务完整列表不变。
+- 数据库路径指向已有目录时退出码 1、标准输出为空、标准错误说明存储失败。
