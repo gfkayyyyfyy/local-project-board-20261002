@@ -4,7 +4,8 @@
   project-create <项目名称>           创建项目，输出 {"id", "name"}
   task-create <项目标识> <任务标题>   在已有项目下创建任务（初始状态 todo）
   task-move <任务标识> <状态>         在 todo/doing/done 之间移动任务
-  task-list <项目标识> [--status 状态] 按任务标识升序列出项目任务，可按状态筛选
+  task-list <项目标识> [--status 状态] [--query 关键词]
+                                      按任务标识升序列出项目任务，可按状态和标题关键词筛选
 
 退出码：0 成功；2 参数或业务校验失败；1 存储（数据库）失败。
 """
@@ -142,6 +143,11 @@ def cmd_task_list(conn, args):
             f"invalid status {status!r}; expected one of: "
             + ", ".join(VALID_STATUSES)
         )
+    query = args.query
+    if query is not None:
+        query = query.strip()
+        if not query:
+            usage_error("query keyword must not be empty")
     try:
         require_project(conn, project_id)
         if status is None:
@@ -158,6 +164,8 @@ def cmd_task_list(conn, args):
             ).fetchall()
     except sqlite3.Error as exc:
         storage_error(str(exc))
+    if query is not None:
+        rows = [row for row in rows if query in row[2]]
     emit([task_object(row) for row in rows])
 
 
@@ -187,6 +195,10 @@ def build_parser():
     p.add_argument(
         "--status",
         help="可选状态筛选：todo / doing / done；省略时返回全部任务",
+    )
+    p.add_argument(
+        "--query",
+        help="可选标题关键词：大小写敏感的连续子串匹配，可与 --status 同时使用",
     )
     p.set_defaults(func=cmd_task_list)
 
