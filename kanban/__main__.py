@@ -6,6 +6,8 @@
   task-create <项目标识> <任务标题>   在已有项目下创建任务（初始状态 todo）
   task-move <任务标识> <状态>         在 todo/doing/done 之间移动任务
   task-rename <任务标识> <新标题>     修改任务标题，保留标识、所属项目与状态
+  task-show <任务标识>               按跨项目唯一的任务标识读取单条任务，
+                                      无需先知道所属项目，查询不改动数据
   task-list <项目标识> [--status 状态] [--query 关键词]
       按任务标识升序列出项目任务，可按状态和标题关键词（大小写敏感的连续子串）筛选
   project-stats <项目标识>
@@ -187,6 +189,20 @@ def cmd_task_rename(conn, args):
     emit({"id": row[0], "project_id": row[1], "title": title, "status": row[3]})
 
 
+def cmd_task_show(conn, args):
+    task_id = parse_positive_int(args.task_id, "task id")
+    try:
+        row = conn.execute(
+            "SELECT id, project_id, title, status FROM tasks WHERE id = ?",
+            (task_id,),
+        ).fetchone()
+        if row is None:
+            usage_error(f"task {task_id} does not exist")
+    except sqlite3.Error as exc:
+        storage_error(str(exc))
+    emit(task_object(row))
+
+
 def cmd_task_list(conn, args):
     project_id = parse_positive_int(args.project_id, "project id")
     query = args.query
@@ -273,6 +289,10 @@ def build_parser():
     p.add_argument("task_id", help="任务标识（正整数）")
     p.add_argument("title", help="新任务标题")
     p.set_defaults(func=cmd_task_rename)
+
+    p = sub.add_parser("task-show", help="按标识读取单条任务")
+    p.add_argument("task_id", help="任务标识（正整数，允许前导零）")
+    p.set_defaults(func=cmd_task_show)
 
     p = sub.add_parser("task-list", help="列出项目任务")
     p.add_argument("project_id", help="项目标识（正整数）")
