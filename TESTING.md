@@ -132,7 +132,6 @@ python3 test_task_create.py \
   stdout、stderr 及预期差异。
 
 # project-create 创建项目回归测试
-
 `test_project_create.py` 针对 `project-create <项目名称>`，数据准备、创建与
 结果核对全部经公开命令完成（`project-create` / `task-create` / `task-move` /
 `project-list` / `task-list`），不直接读写数据库：
@@ -161,3 +160,37 @@ python3 test_project_create.py \
 - 不依赖 JSON 键序、错误文案逐字拼写或固定标识值；失败时打印输入、实际
   退出码、stdout、stderr 及预期差异。每个用例使用独立临时目录与全新
   SQLite 文件，结束后自动清理，不接触使用者自己的数据库。
+
+# project-stats 项目任务状态汇总回归测试
+
+`test_project_stats.py` 针对 `project-stats <项目标识>`，数据准备与结果核对全部
+经公开命令完成（`project-create` / `task-create` / `task-move` / `task-list` /
+`project-list` / `project-stats`），不直接写数据库（仅一处只读连接核对空库），
+运行方式同其他回归：
+
+```bash
+python3 test_project_stats.py
+python3 -m unittest test_project_stats -v
+python3 test_project_stats.py \
+    ProjectStatsRegression.test_acceptance_scenario
+```
+
+- 用户指定的验收场景端到端覆盖：项目 1 四条任务（t1/t2 todo、t3 doing、
+  t4 done），项目 2 一条 doing；`task-move 1 doing` 后 `project-stats 1`
+  恰为 `{"project_id":1,"total":4,"todo":1,"doing":2,"done":1}`，项目 2
+  保持 `total=1, doing=1`；另一个独立进程查询同一路径读到相同结果。
+- 成功路径：退出码 0、stderr 为空、stdout 为只含 `project_id` / `total` /
+  `todo` / `doing` / `done` 的单个 JSON 对象，五个字段均为非负整数且
+  三者之和等于 `total`；空项目四个数量均为 0；同标题任务各计一次；只统计
+  目标项目；统计只反映当前已保存状态（同一任务多次来回移动不累计次数）；
+  重复查询结果一致，且查询前后 `task-list` / `project-list` 快照不变
+  （只读，不补写业务记录）。
+- 标识规则：`0001` 及前导五千个零的 `1` 与 `1` 等价；零、全零、负数、
+  非数字、小数/科学计数法/带正负号或空白、全角数字、`9223372036854775808`、
+  五千个 9 及其前导零同值写法均退出码 2、stdout 为空、stderr 说明原因
+  （越界值说明超出支持范围）且无回溯，拒绝前后统计不变；上限本身按存在性
+  处理（不存在则说明 `does not exist`）；范围内不存在（如 999）、缺少项目
+  标识、缺少 `--db` 同样退出码 2。
+- 存储与初始化：`--db` 指向已有目录时退出码 1、stdout 为空、stderr 含
+  `storage failure` 且无回溯；父目录存在而数据库文件不存在时沿用初始化
+  行为创建空库，随后因项目 1 不存在退出码 2，库中无任何项目或任务。

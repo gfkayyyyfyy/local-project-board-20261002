@@ -8,6 +8,8 @@
   task-rename <任务标识> <新标题>     修改任务标题，保留标识、所属项目与状态
   task-list <项目标识> [--status 状态] [--query 关键词]
       按任务标识升序列出项目任务，可按状态和标题关键词（大小写敏感的连续子串）筛选
+  project-stats <项目标识>
+      汇总项目当前各状态任务数量，输出 {"project_id", "total", "todo", "doing", "done"}
 
 退出码：0 成功；2 参数或业务校验失败；1 存储（数据库）失败。
 """
@@ -219,6 +221,30 @@ def cmd_task_list(conn, args):
     emit([task_object(row) for row in rows])
 
 
+def cmd_project_stats(conn, args):
+    project_id = parse_positive_int(args.project_id, "project id")
+    counts = dict.fromkeys(VALID_STATUSES, 0)
+    try:
+        require_project(conn, project_id)
+        rows = conn.execute(
+            "SELECT status, COUNT(*) FROM tasks WHERE project_id = ? GROUP BY status",
+            (project_id,),
+        ).fetchall()
+    except sqlite3.Error as exc:
+        storage_error(str(exc))
+    for status, count in rows:
+        if status in counts:
+            counts[status] = count
+    total = sum(counts.values())
+    emit({
+        "project_id": project_id,
+        "total": total,
+        "todo": counts["todo"],
+        "doing": counts["doing"],
+        "done": counts["done"],
+    })
+
+
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="kanban", description="本地项目任务看板（SQLite 存储）"
@@ -259,6 +285,10 @@ def build_parser():
         help="可选标题关键词：去除首尾空白后按大小写敏感的连续子串匹配标题",
     )
     p.set_defaults(func=cmd_task_list)
+
+    p = sub.add_parser("project-stats", help="汇总项目任务状态数量")
+    p.add_argument("project_id", help="项目标识（正整数）")
+    p.set_defaults(func=cmd_project_stats)
 
     return parser
 
