@@ -10,8 +10,9 @@
                                       无需先知道所属项目，查询不改动数据
   task-list <项目标识> [--status 状态] [--query 关键词]
       按任务标识升序列出项目任务，可按状态和标题关键词（大小写敏感的连续子串）筛选
-  project-stats <项目标识>
-      汇总项目当前各状态任务数量，输出 {"project_id", "total", "todo", "doing", "done"}
+  project-stats <项目标识> [--query 关键词]
+      汇总项目当前各状态任务数量，可按标题关键词（大小写敏感的连续子串）筛选，
+      输出 {"project_id", "total", "todo", "doing", "done"}
 
 退出码：0 成功；2 参数或业务校验失败；1 存储（数据库）失败。
 """
@@ -239,12 +240,25 @@ def cmd_task_list(conn, args):
 
 def cmd_project_stats(conn, args):
     project_id = parse_positive_int(args.project_id, "project id")
+    query = args.query
+    if query is not None:
+        query = query.strip()
+        if not query:
+            usage_error("query keyword must not be empty")
+    clauses = ["project_id = ?"]
+    params = [project_id]
+    if query is not None:
+        # 与 task-list 一致：INSTR 为大小写敏感的连续子串匹配，
+        # %、_、引号等均按普通字符处理，只匹配标题不匹配项目名称
+        clauses.append("INSTR(title, ?) > 0")
+        params.append(query)
     counts = dict.fromkeys(VALID_STATUSES, 0)
     try:
         require_project(conn, project_id)
         rows = conn.execute(
-            "SELECT status, COUNT(*) FROM tasks WHERE project_id = ? GROUP BY status",
-            (project_id,),
+            "SELECT status, COUNT(*) FROM tasks WHERE "
+            + " AND ".join(clauses) + " GROUP BY status",
+            params,
         ).fetchall()
     except sqlite3.Error as exc:
         storage_error(str(exc))
@@ -308,6 +322,10 @@ def build_parser():
 
     p = sub.add_parser("project-stats", help="汇总项目任务状态数量")
     p.add_argument("project_id", help="项目标识（正整数）")
+    p.add_argument(
+        "--query",
+        help="可选标题关键词：去除首尾空白后按大小写敏感的连续子串匹配标题",
+    )
     p.set_defaults(func=cmd_project_stats)
 
     return parser
