@@ -16,6 +16,7 @@ python -m kanban --db <数据库路径> project-list
 python -m kanban --db <数据库路径> task-create <项目标识> <任务标题>
 python -m kanban --db <数据库路径> task-move <任务标识> <todo|doing|done>
 python -m kanban --db <数据库路径> task-rename <任务标识> <新标题>
+python -m kanban --db <数据库路径> task-show <任务标识>
 python -m kanban --db <数据库路径> task-list <项目标识> [--status <todo|doing|done>] [--query <关键词>]
 python -m kanban --db <数据库路径> project-stats <项目标识>
 ```
@@ -25,6 +26,7 @@ python -m kanban --db <数据库路径> project-stats <项目标识>
 - 名称与标题保存前去除首尾空白，允许重名；新任务初始状态为 `todo`。
 - `project-list` 返回数据库中全部项目（含尚无任务的项目），每个项目只含 `id` 与 `name`，按 `id` 数值升序；同名项目各自保留，名称按已保存的值原样返回；查询不改动任何数据。
 - `task-rename` 按跨项目唯一的任务标识修改标题，只改该任务的标题，标识、所属项目与当前状态保持不变；任务标识允许前导零并按数值判断。新标题沿用创建任务的规则：去除首尾空白（内部空白、大小写、中文、`%`、`_` 与引号等原样保留），允许与其他任务重名。处理后与原标题相同时也算成功，返回当前任务且不新增任务。返回的对象只含 `id`、`project_id`、`title`、`status`。
+- `task-show` 按跨项目唯一的任务标识读取当前保存的单条任务，无需提供所属项目。返回的对象只含 `id`、`project_id`、`title`、`status`：标题按保存值原样返回（内部空白、中文、大小写、`%`、`_` 与引号均不改变），状态为当前值；同标题任务仍按各自标识区分。任务标识允许前导零并按数值判断。只读查询，不改动任何数据，与 `task-list` 中同一任务的对象完全一致。
 - `task-list` 可附加 `--status todo|doing|done` 只返回该项目中匹配状态的任务，按原样拼写精确匹配；省略时返回项目全部任务。
 - `task-list` 可附加 `--query 关键词`，只返回标题包含该关键词的任务：关键词先去除首尾空白（内部空白保留），再按大小写敏感的连续子串匹配，不分词、不归一化，`%`、`_`、引号均为普通字符，且只匹配标题；可与 `--status` 同时使用，两个条件取交集。
 - `project-stats` 返回单个对象，只含 `project_id`、`total`、`todo`、`doing`、`done`：`total` 为该项目全部任务数，其余三者为各状态当前数量（同标题任务各计一次，其他项目任务不计入），三者之和等于 `total`；空项目四个数量均为 0。统计反映当前已保存的状态，不累计移动次数，查询不改动任何数据，重复查询结果一致。

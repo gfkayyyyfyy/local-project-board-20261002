@@ -100,8 +100,39 @@ python3 test_task_rename.py \
 - 不依赖 JSON 键序或错误文案逐字拼写；失败时打印输入、退出码、stdout、
   stderr 及预期与实际差异。
 
-# task-create 创建任务回归测试
+# task-show 单条任务读取回归测试
 
+`test_task_show.py` 针对 `task-show <任务标识>`，数据准备与结果核对全部经
+公开命令完成（`project-create` / `task-create` / `task-move` /
+`task-rename` / `task-list` / `project-list`），不直接操作数据库：
+
+```bash
+python3 test_task_show.py
+python3 -m unittest test_task_show -v
+python3 test_task_show.py TaskShowRegression.test_acceptance_scenario
+```
+
+- 用户指定的验收场景：两个项目各有一条“整理 API”任务，第二条移到 doing、
+  第一条保持 todo；用第二条标识、`0002` 及前导五千个零的写法查询，都只
+  返回第二条（所属项目与 doing 状态准确），与 `task-list` 中该任务对象
+  一致；`task-rename` 改名为“修复 API”后再查询返回新标题及原有标识、
+  项目与状态。
+- 成功路径：退出码 0、stderr 为空、stdout 为只含 `id` / `project_id` /
+  `title` / `status` 的单个 JSON 对象；标题按保存值原样返回（内部空白、
+  中文、大小写、`%`、`_`、单引号不变），同标题任务按各自标识区分；只读，
+  查询前后项目与任务的内容和数量不变。
+- 标识规则：允许前导零并按数值判断；零、全零、负数、非数字、小数/科学
+  计数法、带正号或首尾空白、全角数字、`9223372036854775808`、五千个 9
+  及其前导零同值写法均退出码 2、stdout 为空、stderr 说明原因（越界值
+  说明超出支持范围）且无回溯；上限本身按存在性处理；范围内不存在（如
+  999）说明 `does not exist`；缺少任务标识、缺少 `--db` 或其路径值
+  同样退出码 2。
+- 存储与初始化：`--db` 指向目录、父目录不存在、文件不是可用 SQLite 数据库
+  时退出码 1、stdout 为空、stderr 含 `storage failure` 且无回溯；父目录
+  存在而库文件不存在时沿用自动建库行为，随后按任务不存在退出码 2，新库
+  `project-list` 为空、不含任何任务。
+
+# task-create 创建任务回归测试
 `test_task_create.py` 针对 `task-create <项目标识> <任务标题>`，数据准备、
 创建与结果核对全部经公开命令完成（`project-create` / `task-move` /
 `task-list`），不直接操作数据库：
