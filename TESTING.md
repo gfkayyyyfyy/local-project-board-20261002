@@ -100,6 +100,36 @@ python3 test_task_rename.py \
 - 不依赖 JSON 键序或错误文案逐字拼写；失败时打印输入、退出码、stdout、
   stderr 及预期与实际差异。
 
+# project-create 创建项目回归测试
+
+`test_project_create.py` 针对 `project-create <项目名称>`，数据准备、创建与
+结果核对全部经公开命令完成（`project-create` / `task-create` / `task-move` /
+`project-list` / `task-list`），不直接读写数据库、不调用内部函数：
+
+```bash
+python3 test_project_create.py
+python3 -m unittest test_project_create -v
+python3 -m unittest discover -p 'test_project_create.py' -v
+python3 test_project_create.py \
+    ProjectCreateRegression.test_create_returns_json_object_and_persists
+```
+
+- 成功路径：父目录存在而数据库文件不存在时自动建库建项目；退出码 0、
+  stderr 为空、stdout 为只含 `id` / `name` 的单个 JSON 对象，id 为正整数；
+  独立命令进程 `project-list` 读到完全相同的对象。名称 `" \t 研发  API_100%' \t"`
+  保存并返回为 `研发  API_100%'`（只去首尾空白，内部双空格、中文、大小写、
+  `%`、`_`、单引号原样保留）。
+- 再次提交同一名称产生不同标识，`project-list` 同时保留两条记录并按 id 升序。
+- 已有项目中准备一条 doing 任务后再创建新项目，原项目对象与该任务的完整
+  内容（标识、所属项目、标题、状态）不变。
+- 拒绝路径：空字符串、纯空格或制表符名称、缺少名称参数，在可打开的既有
+  临时库上均退出码 2、stdout 为空、stderr 说明原因且无 Python 回溯；拒绝
+  前后 `project-list` 与原项目 `task-list` 返回值完全一致。
+- 存储失败：有效名称配合指向已有目录的 `--db` 为退出码 1、stdout 为空、
+  stderr 说明 `storage failure`，既有临时库数据不变。
+- 不依赖 JSON 键序、错误文案逐字拼写或固定标识值；失败时打印命令行输入、
+  实际退出码、stdout、stderr 及预期差异。
+
 # task-create 创建任务回归测试
 
 `test_task_create.py` 针对 `task-create <项目标识> <任务标题>`，数据准备、
