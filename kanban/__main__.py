@@ -2,7 +2,9 @@
 
 子命令：
   project-create <项目名称>           创建项目，输出 {"id", "name"}
-  project-list                       列出全部项目，输出按标识升序的 [{"id", "name"}]
+  project-list [--query 关键词]
+      按标识升序列出项目，输出 [{"id", "name"}]，可按名称关键词
+      （大小写敏感的连续子串）筛选，省略 --query 时列出全部项目
   task-create <项目标识> <任务标题>   在已有项目下创建任务（初始状态 todo）
   task-move <任务标识> <状态>         在 todo/doing/done 之间移动任务
   task-rename <任务标识> <新标题>     修改任务标题，保留标识、所属项目与状态
@@ -110,10 +112,20 @@ def cmd_project_create(conn, args):
 
 
 def cmd_project_list(conn, args):
+    keyword = normalize_query(args.query)
+    if keyword is None:
+        sql = "SELECT id, name FROM projects ORDER BY id ASC"
+        params = ()
+    else:
+        # INSTR 为大小写敏感的连续子串匹配，只匹配项目名称、不匹配任务标题；
+        # 中文、%、_、引号等均按普通字符处理
+        sql = (
+            "SELECT id, name FROM projects WHERE INSTR(name, ?) > 0 "
+            "ORDER BY id ASC"
+        )
+        params = (keyword,)
     try:
-        rows = conn.execute(
-            "SELECT id, name FROM projects ORDER BY id ASC"
-        ).fetchall()
+        rows = conn.execute(sql, params).fetchall()
     except sqlite3.Error as exc:
         storage_error(str(exc))
     emit([{"id": row[0], "name": row[1]} for row in rows])
@@ -205,12 +217,13 @@ def cmd_task_show(conn, args):
 
 
 def normalize_query(raw):
-    """规范化 --query 标题关键词（task-list 与 project-stats 共用）。
+    """规范化 --query 关键词（task-list、project-stats、project-list 共用）。
 
-    省略 --query 时返回 None，表示不加标题条件；否则去除首尾空白（保留内部
+    省略 --query 时返回 None，表示不加关键词条件；否则去除首尾空白（保留内部
     空白），去空白后为空则按参数错误拒绝。匹配阶段使用 INSTR 做大小写敏感
-    的连续子串匹配，因此中文、%、_、引号等均为普通字符，且只匹配任务标题、
-    不匹配项目名称。
+    的连续子串匹配，因此中文、%、_、引号等均为普通字符；task-list 与
+    project-stats 只匹配任务标题（不匹配项目名称），project-list 只匹配
+    项目名称（不匹配任务标题）。
     """
     if raw is None:
         return None
@@ -312,6 +325,10 @@ def build_parser():
     p.set_defaults(func=cmd_project_create)
 
     p = sub.add_parser("project-list", help="列出全部项目")
+    p.add_argument(
+        "--query",
+        help="可选名称关键词：去除首尾空白后按大小写敏感的连续子串匹配项目名称",
+    )
     p.set_defaults(func=cmd_project_list)
 
     p = sub.add_parser("task-create", help="创建任务")

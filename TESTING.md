@@ -1,3 +1,31 @@
+# project-list 关键词筛选回归测试
+
+`test_project_list_query.py` 针对 `project-list [--query 关键词]` 的项目名称
+筛选，数据准备与结果核对全部经公开命令完成（`project-create` / `task-create`
+/ `project-list`），不直接写数据库，运行方式同其他回归：
+
+```bash
+python3 test_project_list_query.py
+python3 -m unittest test_project_list_query -v
+python3 test_project_list_query.py \
+    ProjectListQueryRegression.test_acceptance_api_matches_project_names_only
+```
+
+- 用户指定的验收场景端到端覆盖：依次创建 `研发 API`、`研发 api`、`研发 API`
+  （第三个无任务）和 `资料`（其任务标题含 `API`），`project-list --query
+  "  API  "` 恰好返回第一、第三个项目（标识与创建一致），第二、第四个不出现。
+- 关键词语义与 `task-list --query` 一致，但只匹配项目名称：去首尾空白、保留
+  内部空白、大小写敏感的连续子串，不分词、不归一化；中文、`%`、`_`、引号为
+  普通字符；同名项目各自保留，尚无任务的项目同样参与匹配；任务标题命中而项目
+  名称不含关键词的项目不出现；无命中或空库返回空数组；省略 `--query` 时仍
+  返回全部项目；结果按项目标识数值升序，对象只含 `id` / `name`。
+- 只读与重复查询：筛选不改动项目、任务及任务状态，重复查询结果一致。
+- 拒绝路径：空字符串或纯空白关键词、`--query` 缺值均退出码 2、stdout 为空、
+  stderr 说明原因且无回溯，已有项目不变。
+- 存储失败：有效关键词配合 `--db` 指向已有目录、父目录不存在或文件不是可用
+  SQLite 数据库时退出码 1、stdout 为空、stderr 含 `storage failure` 且无回溯；
+  父目录存在而数据库文件不存在时沿用自动建库行为并成功返回空数组。
+
 # task-list 关键词筛选回归测试
 
 `test_task_list_query.py` 是针对 `task-list --query` 关键词匹配及其与
