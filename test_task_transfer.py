@@ -6,6 +6,11 @@
 前导零标识、任务不存在、目标项目不存在、标识格式非法、零值与越界、
 参数缺失，以及数据库不可用时的存储失败路径。
 
+另含转移后继续移动状态的验收场景：任务转入另一项目后仍以原标识定位，
+``task-move --from`` 的来源状态校验读取当前保存值；移动成功后重复提交
+同一请求会按当前状态与预期状态不符被拒绝（退出码 2），且拒绝前后
+task-show、两项目任务列表与 project-stats 的结果完全一致。
+
 测试只通过 README 公开的 ``python -m kanban`` 入口驱动产品：用
 project-create / task-create / task-move 准备真实数据，用 task-transfer
 执行转移，再用 task-list / project-stats / project-list 查询验证结果
@@ -132,6 +137,42 @@ class TaskTransferRegression(unittest.TestCase):
         detail = self._detail(("project-list",), proc, expected="退出码 0")
         self.assertEqual(proc.returncode, 0, f"项目查询应成功：\n{detail}")
         return json.loads(proc.stdout)
+
+    def show_task(self, task_id):
+        """通过公开命令读取单条任务（字段集合与 task-show 契约一致）。"""
+        cli_args = ("task-show", str(task_id))
+        proc = self.run_cli(*cli_args)
+        detail = self._detail(
+            cli_args, proc,
+            expected="退出码 0、stderr 为空、stdout 为单个 JSON 任务对象",
+        )
+        self.assertEqual(proc.returncode, 0, f"task-show 应成功：\n{detail}")
+        self.assertEqual(proc.stderr, "", f"查询时标准错误应为空：\n{detail}")
+        try:
+            obj = json.loads(proc.stdout)
+        except json.JSONDecodeError:
+            self.fail(f"task-show 的 stdout 不是合法 JSON：\n{detail}")
+        self.assertIsInstance(
+            obj, dict, f"task-show 应返回单个 JSON 对象：\n{detail}"
+        )
+        self.assertEqual(
+            set(obj.keys()), TASK_FIELDS,
+            f"task-show 对象字段结构不符：\n{detail}",
+        )
+        return obj
+
+    def full_snapshot(self):
+        """记录拒绝前后需完全一致的全部视图：task-show、两项目列表、统计、名称。"""
+        return {
+            "target": self.show_task(self.target_id),
+            "sibling": self.show_task(self.sibling_id),
+            "other": self.show_task(self.other_id),
+            "alpha": self.list_project(self.project_alpha),
+            "beta": self.list_project(self.project_beta),
+            "alpha_stats": self.stats(self.project_alpha),
+            "beta_stats": self.stats(self.project_beta),
+            "projects": self.project_names(),
+        }
 
     def snapshot(self):
         """记录两个项目的当前任务列表与项目名称，用于前后比对。"""
@@ -353,6 +394,211 @@ class TaskTransferRegression(unittest.TestCase):
                 "total": 2, "todo": 1, "doing": 1, "done": 0,
             },
             "目标项目应计入转入的 doing 任务",
+        )
+
+    # ---------- 转移后继续移动状态（--from 读取当前保存值） ----------
+
+    def test_move_after_transfer_locates_by_original_id(self):
+        # 夹具中 T、S 在 alpha（T 先建、S 后建），U 在 beta，三条同标题。
+        # 先把 T 置为 doing，S、U 保持 todo。
+        doing_obj = self.cli_json(
+            "task-move", str(self.target_id), "doing"
+        )
+        self.assertEqual(
+            doing_obj,
+            {
+                "id": self.target_id,
+                "project_id": self.project_alpha,
+                "title": SHARED_TITLE,
+                "status": "doing",
+            },
+        )
+
+        # 第一步：把 T 从 alpha 转入 beta。转移结果只改变所属项目，
+        # 原标识、标题、doing 状态原样保留，响应与随后独立查询一致。
+        transfer_args = ("task-transfer", str(self.target_id),
+                         str(self.project_beta))
+        transfer_proc = self.run_cli(*transfer_args)
+        detail = self._detail(
+            transfer_args, transfer_proc,
+            expected=(
+                "退出码 0、stderr 为空、stdout 为与 task-show 同结构的单个"
+                f"任务对象：T 属于 beta、标识/标题不变、状态 doing"
+            ),
+        )
+        self.assertEqual(transfer_proc.returncode, 0, f"转移应成功：\n{detail}")
+        self.assertEqual(
+            transfer_proc.stderr, "", f"成功转移时标准错误应为空：\n{detail}"
+        )
+        try:
+            transferred = json.loads(transfer_proc.stdout)
+        except json.JSONDecodeError:
+            self.fail(f"转移结果的 stdout 不是合法 JSON：\n{detail}")
+        expected_transferred = {
+            "id": self.target_id,
+            "project_id": self.project_beta,
+            "title": SHARED_TITLE,
+            "status": "doing",
+        }
+        self.assertIsInstance(
+            transferred, dict,
+            f"转移结果应为单个 JSON 对象而非数组：\n{detail}",
+        )
+        self.assertEqual(
+            set(transferred.keys()), TASK_FIELDS,
+            f"转移结果对象字段结构不符：\n{detail}",
+        )
+        self.assertEqual(transferred, expected_transferred,
+                         f"转移结果应只改变所属项目：\n{detail}")
+        # 独立进程 task-show 复核：响应已落库且与响应一致
+        self.assertEqual(
+            self.show_task(self.target_id), expected_transferred,
+            f"转移后 task-show 应与转移响应一致：\n{detail}",
+        )
+
+        # 第二步：转移完成后，仍以 T 的原标识把状态从 doing 改为 done，
+        # 并显式 --from doing。来源状态校验必须读取当前保存值（doing），
+        # 任务跨项目后仍按同一标识定位。
+        move_args = ("task-move", str(self.target_id), "done",
+                     "--from", "doing")
+        move_proc = self.run_cli(*move_args)
+        detail = self._detail(
+            move_args, move_proc,
+            expected=(
+                "退出码 0、stderr 为空、stdout 为与 task-show 同结构的单个"
+                f"任务对象：{expected_transferred!r} 的状态改为 done"
+            ),
+        )
+        self.assertEqual(
+            move_proc.returncode, 0,
+            f"转移后按原标识移动应成功（退出码 0）：\n{detail}",
+        )
+        self.assertEqual(
+            move_proc.stderr, "",
+            f"成功移动时标准错误应为空：\n{detail}",
+        )
+        try:
+            moved = json.loads(move_proc.stdout)
+        except json.JSONDecodeError:
+            self.fail(f"移动结果的 stdout 不是合法 JSON：\n{detail}")
+        expected_done = dict(expected_transferred, status="done")
+        self.assertIsInstance(
+            moved, dict,
+            f"移动结果应为单个 JSON 对象而非数组：\n{detail}",
+        )
+        self.assertEqual(
+            set(moved.keys()), TASK_FIELDS,
+            f"移动结果对象字段结构不符：\n{detail}",
+        )
+        self.assertEqual(
+            moved, expected_done,
+            f"移动结果应只把状态改为 done：\n{detail}",
+        )
+
+        # 成功移动的响应与随后独立查询一致：T 属于 beta、原标识与标题未变、
+        # 状态 done。
+        self.assertEqual(
+            self.show_task(self.target_id), expected_done,
+            f"移动后 task-show 应与移动响应一致：\n"
+            f"移动响应={moved!r}",
+        )
+
+        # 独立查询确认归属、对照任务与列表顺序：
+        # alpha 只剩 S；beta 中 T、U 各出现一次且按标识数值升序。
+        alpha_tasks = self.list_project(self.project_alpha)
+        beta_tasks = self.list_project(self.project_beta)
+        expected_s = {
+            "id": self.sibling_id,
+            "project_id": self.project_alpha,
+            "title": SHARED_TITLE,
+            "status": "todo",
+        }
+        expected_u = {
+            "id": self.other_id,
+            "project_id": self.project_beta,
+            "title": SHARED_TITLE,
+            "status": "todo",
+        }
+        self.assertEqual(
+            alpha_tasks, [expected_s],
+            f"转移后 alpha 应只剩对照任务 S：\n实际={alpha_tasks!r}\n{detail}",
+        )
+        self.assertEqual(
+            beta_tasks, [expected_done, expected_u],
+            f"beta 应含转入的 T(done) 与对照任务 U(todo)，且按标识升序：\n"
+            f"实际={beta_tasks!r}\n{detail}",
+        )
+        self.assertEqual(
+            [obj["id"] for obj in beta_tasks],
+            sorted(obj["id"] for obj in beta_tasks),
+            f"beta 任务列表应按任务标识数值升序：\n{detail}",
+        )
+        # 不复制任务：任务总数始终为三
+        self.assertEqual(len(alpha_tasks) + len(beta_tasks), 3)
+        # 两个项目的名称不变
+        self.assertEqual(
+            self.project_names(),
+            [
+                {"id": self.project_alpha, "name": "alpha"},
+                {"id": self.project_beta, "name": "beta"},
+            ],
+        )
+
+        # 统计：alpha 一条 todo；beta 两条，todo、done 各一条；两项目 doing=0
+        self.assertEqual(
+            self.stats(self.project_alpha),
+            {"project_id": self.project_alpha,
+             "total": 1, "todo": 1, "doing": 0, "done": 0},
+        )
+        self.assertEqual(
+            self.stats(self.project_beta),
+            {"project_id": self.project_beta,
+             "total": 2, "todo": 1, "doing": 0, "done": 1},
+        )
+
+        # 第三步：成功移动后再次提交同一移动请求。当前已为 done，与
+        # --from doing 不符：退出码 2、stdout 为空，stderr 同时说明当前
+        # done 与预期 doing，且没有 Python 回溯。
+        before_reject = self.full_snapshot()
+        repeat_proc = self.run_cli(*move_args)
+        repeat_detail = self._detail(
+            move_args, repeat_proc,
+            expected=(
+                "退出码 2、stdout 为空、stderr 同时说明当前状态 done 与"
+                "预期状态 doing，且无 Python 回溯；拒绝不改变任何数据"
+            ),
+        )
+        self.assertEqual(
+            repeat_proc.returncode, 2,
+            f"重复移动应被拒绝（退出码 2）：\n{repeat_detail}",
+        )
+        self.assertEqual(
+            repeat_proc.stdout, "",
+            f"拒绝时标准输出应为空：\n{repeat_detail}",
+        )
+        self.assertNotEqual(
+            repeat_proc.stderr.strip(), "",
+            f"拒绝时标准错误应说明原因：\n{repeat_detail}",
+        )
+        stderr_low = repeat_proc.stderr.lower()
+        self.assertIn(
+            "done", stderr_low,
+            f"标准错误应说明当前状态为 done：\n{repeat_detail}",
+        )
+        self.assertIn(
+            "doing", stderr_low,
+            f"标准错误应说明 --from 预期状态为 doing：\n{repeat_detail}",
+        )
+        self.assertNotIn(
+            "Traceback", repeat_proc.stderr,
+            f"标准错误不应包含 Python 异常回溯：\n{repeat_detail}",
+        )
+
+        # 拒绝前后的 task-show、两项目任务列表和 project-stats 完全相同
+        self.assertEqual(
+            self.full_snapshot(), before_reject,
+            f"拒绝移动后任何查询结果都不得变化：\n{repeat_detail}\n"
+            f"拒绝前={before_reject!r}",
         )
 
     # ---------- 失败路径 ----------
