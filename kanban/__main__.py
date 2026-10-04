@@ -2,6 +2,8 @@
 
 子命令：
   project-create <项目名称>           创建项目，输出 {"id", "name"}
+  project-rename <项目标识> <新名称>   修改项目名称，保留标识与全部任务，
+                                      输出 {"id", "name"}
   project-list [--query 关键词]
       按标识升序列出项目，输出 [{"id", "name"}]，可按名称关键词
       （大小写敏感的连续子串）筛选，省略 --query 时列出全部项目
@@ -129,6 +131,26 @@ def cmd_project_list(conn, args):
     except sqlite3.Error as exc:
         storage_error(str(exc))
     emit([{"id": row[0], "name": row[1]} for row in rows])
+
+
+def cmd_project_rename(conn, args):
+    project_id = parse_positive_int(args.project_id, "project id")
+    name = args.name.strip()
+    if not name:
+        usage_error("project name must not be empty")
+    try:
+        row = conn.execute(
+            "SELECT name FROM projects WHERE id = ?", (project_id,)
+        ).fetchone()
+        if row is None:
+            usage_error(f"project {project_id} does not exist")
+        if row[0] != name:
+            conn.execute("UPDATE projects SET name = ? WHERE id = ?",
+                         (name, project_id))
+            conn.commit()
+    except sqlite3.Error as exc:
+        storage_error(str(exc))
+    emit({"id": project_id, "name": name})
 
 
 def require_project(conn, project_id):
@@ -323,6 +345,11 @@ def build_parser():
     p = sub.add_parser("project-create", help="创建项目")
     p.add_argument("name", help="项目名称")
     p.set_defaults(func=cmd_project_create)
+
+    p = sub.add_parser("project-rename", help="修改项目名称")
+    p.add_argument("project_id", help="项目标识（正整数，允许前导零）")
+    p.add_argument("name", help="新项目名称")
+    p.set_defaults(func=cmd_project_rename)
 
     p = sub.add_parser("project-list", help="列出全部项目")
     p.add_argument(
