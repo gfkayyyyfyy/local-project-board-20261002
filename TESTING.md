@@ -276,6 +276,17 @@ python3 test_task_transfer.py \
   前导零写法与数值等价；目标就是当前所属项目时成功返回原任务且不新增
   记录；目标项目为空（新建无任务项目）也允许转移；`project-stats`
   按新归属统计（来源扣除、目标计入）。
+- 转移后继续移动：`test_move_after_transfer_still_locates_by_original_id`
+  端到端覆盖 alpha 的 T（doing）转入 beta 后，以 T 的原标识执行
+  `task-move <T> done --from doing`——任务仍按跨项目唯一的原标识定位，
+  来源校验读取转移后当前保存的 doing，退出码 0、stderr 为空、stdout 与
+  `task-show` 同结构；独立查询确认 T 属于 beta、原标识与标题不变，
+  alpha 只剩对照任务 S、beta 中 T(done) 与 U(todo) 各一次且按标识升序。
+  再次提交同一移动请求退出码 2、stdout 为空、stderr 同时含当前 `done`
+  与预期 `doing` 且无回溯，拒绝前后 `task-show`、两项目 `task-list` 与
+  `project-stats` 完全相同；最终 alpha 共一条 todo、beta todo/done 各一条，
+  两项目 doing 均为零，任务总数始终为三；转移与移动的响应均与随后独立
+  查询一致。
 - 拒绝路径：缺少任务标识或目标项目标识、标识非数字、零或全零、
   `9223372036854775808` 越界、任务不存在、目标项目不存在，均退出码 2、
   stdout 为空、stderr 说明对应原因且无回溯，失败前后两个项目的任务与
