@@ -224,6 +224,41 @@ python3 test_project_create.py \
   退出码、stdout、stderr 及预期差异。每个用例使用独立临时目录与全新
   SQLite 文件，结束后自动清理，不接触使用者自己的数据库。
 
+# project-rename 项目改名回归测试
+
+`test_project_rename.py` 针对 `project-rename <项目标识> <新名称>`，数据准备、
+改名与结果核对全部经公开命令完成（`project-create` / `task-create` /
+`task-move` / `project-rename` / `project-list` / `task-list`），不直接写数据库
+（仅一处只读连接核对自动建库后的空库），运行方式同其他回归：
+
+```bash
+python3 test_project_rename.py
+python3 -m unittest test_project_rename -v
+python3 test_project_rename.py \
+ProjectRenameRegression.test_acceptance_two_same_named_projects
+```
+
+- 用户指定的验收场景端到端覆盖：两个同名项目 `研发`，前者有一条 doing
+  任务、后者无任务；只把前者改名为首尾带空白的 `  研发 API  `（保存为
+  `研发 API`）后，另一个独立命令进程的 `project-list --query API` 只返回
+  前者，全量列表仍按标识升序、后者名称不变，两个项目的任务内容与数量
+  完全不变；按旧名称子串 `研发` 筛选仍同时命中两者。
+- 成功路径：退出码 0、stderr 为空、stdout 为只含 `id` / `name` 的单个
+  JSON 对象，`id` 为原标识（带前导零的同值标识等价），`name` 为保存值；
+  输入 `"  升级  API_100%'  "` 保存为 `升级  API_100%'`（首尾空白去除，
+  内部双空格、中文、大小写、`%`、`_`、单引号原样保留）；改名只影响该
+  项目名称，不创建项目、不合并同名项目，其任务的标识、标题、状态、所属
+  项目与数量以及其他项目均不变。
+- 仅首尾空白不同的同一名称再次提交仍成功，返回同一项目且不新增记录；
+  改成另一个项目的名称也成功（允许重名，同名项目按标识各自保留）。
+- 拒绝路径：空字符串或纯空白名称、缺少必要参数、项目标识为 0 / 负数 /
+  非数字 / `9223372036854775808` / 范围内不存在的标识，均退出码 2、
+  stdout 为空、stderr 说明原因且无回溯，项目与任务列表保持不变；父目录
+  存在而数据库文件不存在时沿用自动建库行为创建空库，随后因项目不存在
+  退出码 2，库中无任何项目或任务。
+- 存储失败：`--db` 指向已有目录时退出码 1、stdout 为空、stderr 含
+  `storage failure` 且无回溯，不污染既有临时库。
+
 # project-stats 项目任务状态汇总回归测试
 
 `test_project_stats.py` 针对 `project-stats <项目标识>`，数据准备与结果核对全部

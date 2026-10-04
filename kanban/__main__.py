@@ -5,6 +5,8 @@
   project-list [--query 关键词]
       按标识升序列出项目，输出 [{"id", "name"}]，可按名称关键词
       （大小写敏感的连续子串）筛选，省略 --query 时列出全部项目
+  project-rename <项目标识> <新名称>
+      修改项目名称，保留标识与已有任务，输出 {"id", "name"}
   task-create <项目标识> <任务标题>   在已有项目下创建任务（初始状态 todo）
   task-move <任务标识> <状态>         在 todo/doing/done 之间移动任务
   task-rename <任务标识> <新标题>     修改任务标题，保留标识、所属项目与状态
@@ -137,6 +139,26 @@ def require_project(conn, project_id):
     ).fetchone()
     if row is None:
         usage_error(f"project {project_id} does not exist")
+
+
+def cmd_project_rename(conn, args):
+    project_id = parse_positive_int(args.project_id, "project id")
+    name = args.name.strip()
+    if not name:
+        usage_error("project name must not be empty")
+    try:
+        row = conn.execute(
+            "SELECT id, name FROM projects WHERE id = ?", (project_id,)
+        ).fetchone()
+        if row is None:
+            usage_error(f"project {project_id} does not exist")
+        if row[1] != name:
+            conn.execute("UPDATE projects SET name = ? WHERE id = ?",
+                         (name, project_id))
+            conn.commit()
+    except sqlite3.Error as exc:
+        storage_error(str(exc))
+    emit({"id": row[0], "name": name})
 
 
 def cmd_task_create(conn, args):
@@ -330,6 +352,11 @@ def build_parser():
         help="可选名称关键词：去除首尾空白后按大小写敏感的连续子串匹配项目名称",
     )
     p.set_defaults(func=cmd_project_list)
+
+    p = sub.add_parser("project-rename", help="修改项目名称")
+    p.add_argument("project_id", help="项目标识（正整数）")
+    p.add_argument("name", help="新项目名称")
+    p.set_defaults(func=cmd_project_rename)
 
     p = sub.add_parser("task-create", help="创建任务")
     p.add_argument("project_id", help="目标项目标识（正整数）")
