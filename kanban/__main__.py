@@ -5,8 +5,12 @@
   project-list [--query 关键词]
       按标识升序列出项目，输出 [{"id", "name"}]，可按名称关键词
       （大小写敏感的连续子串）筛选，省略 --query 时列出全部项目
-  project-rename <项目标识> <新名称>
-      修改项目名称，保留标识与已有任务，输出 {"id", "name"}
+  project-rename <项目标识> <新名称> [--from <预期原名称>]
+      修改项目名称，保留标识与已有任务，输出 {"id", "name"}；可选 --from
+      指定本次改名预期的当前名称，预期原名称与新名称都先去除首尾空白
+      （内部空白、大小写、中文、%、_、引号原样保留），仅当项目已保存的
+      名称与处理后的预期原名称逐字相等时才保存新名称，省略 --from 时
+      不检查原名称
   task-create <项目标识> <任务标题>   在已有项目下创建任务（初始状态 todo）
   task-move <任务标识> <状态> [--from <状态>]
       在 todo/doing/done 之间移动任务；可选 --from 指定本次移动预期的
@@ -164,12 +168,26 @@ def cmd_project_rename(conn, args):
     name = args.name.strip()
     if not name:
         usage_error("project name must not be empty")
+    # 预期原名称同样先去除首尾空白，内部空白、大小写、中文、%、_、引号
+    # 原样保留；去空白后为空按参数错误拒绝
+    expected_name = None
+    if args.from_name is not None:
+        expected_name = args.from_name.strip()
+        if not expected_name:
+            usage_error("expected original name (--from) must not be empty")
     try:
         row = conn.execute(
             "SELECT id, name FROM projects WHERE id = ?", (project_id,)
         ).fetchone()
         if row is None:
             usage_error(f"project {project_id} does not exist")
+        # 提供 --from 时，仅当项目已保存的名称与处理后的预期原名称逐字相等
+        # 才允许改名，不做模糊匹配；新名称与当前名称相同但预期不匹配也拒绝
+        if expected_name is not None and row[1] != expected_name:
+            usage_error(
+                f"project {project_id} current name is {row[1]!r}, "
+                f"but --from expected {expected_name!r}"
+            )
         if row[1] != name:
             conn.execute("UPDATE projects SET name = ? WHERE id = ?",
                          (name, project_id))
@@ -465,6 +483,14 @@ def build_parser():
     p = sub.add_parser("project-rename", help="修改项目名称")
     p.add_argument("project_id", help="项目标识（正整数）")
     p.add_argument("name", help="新项目名称")
+    p.add_argument(
+        "--from",
+        dest="from_name",
+        metavar="NAME",
+        help="可选的预期原名称：与新名称一样先去除首尾空白（内部空白、"
+             "大小写、中文、%%、_、引号原样保留），仅当项目已保存的名称与"
+             "处理后的预期原名称逐字相等时才改名；省略时不检查原名称",
+    )
     p.set_defaults(func=cmd_project_rename)
 
     p = sub.add_parser("task-create", help="创建任务")
