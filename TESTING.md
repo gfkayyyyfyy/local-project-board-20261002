@@ -388,3 +388,36 @@ python3 test_project_stats_status.py \
   前导零（含五千个）按数值等价；拒绝前后项目与任务不变。
 - 存储失败：`--db` 指向已有目录时退出码 1、stdout 为空、stderr 含
   `storage failure` 且无回溯。
+
+# project-stats 多状态并集筛选回归测试
+
+`test_project_stats_multi_status.py` 针对 `project-stats <项目标识>
+[--status 状态]... [--query 关键词]` 的可重复 `--status` 多状态并集筛选，
+数据准备与结果核对全部经公开命令完成（`project-create` / `task-create` /
+`task-move` / `task-list` / `project-stats`），不直接写数据库，
+运行方式同其他回归：
+
+```bash
+python3 test_project_stats_multi_status.py
+python3 -m unittest test_project_stats_multi_status -v
+python3 test_project_stats_multi_status.py \
+    ProjectStatsMultiStatusRegression.test_acceptance_two_statuses_with_query
+```
+
+- 用户指定的验收场景端到端覆盖：项目 1 有 todo 的 `API准备`、doing 的
+  `API实现`、done 的 `API归档` 及 todo 的 `文档整理`，项目 2 另有 doing 的
+  `API实现`；`project-stats 1 --status todo --status doing --query " API "`
+  恰为 `{"project_id":1,"total":2,"todo":1,"doing":1,"done":0}`，
+  交换状态顺序并重复 `todo` 后结果相同，项目 2 同名任务不串入。
+- 多状态语义：多个状态取并集，再与项目范围及 `--query` 标题条件取交集；
+  状态顺序与重复值不影响结果，同一任务只计一次；全部三种状态等同于省略
+  `--status`；只传一个状态或省略 `--status` 时保持原有统计结果；`total`
+  为命中任务数，各状态数量只统计命中任务，未选择状态为 0，三者之和等于
+  `total`；空项目或无命中返回四个 0；重复查询结果一致且只读。
+- 拒绝路径：每次出现的状态都按原样校验，非法值即使位于合法值之前也拒绝
+  整次查询（大小写变化、带首尾空白、空字符串、逗号合并状态、未知取值），
+  `--status` 缺值、空关键词、缺少项目标识、标识为 0 / 负数 / 非数字 /
+  `9223372036854775808`、项目不存在，均退出码 2、stdout 为空、stderr
+  说明原因且无回溯，已有项目与任务不变。
+- 存储失败：`--db` 指向已有目录时退出码 1、stdout 为空、stderr 含
+  `storage failure` 且无回溯。
