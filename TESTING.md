@@ -469,6 +469,41 @@ ProjectRenameRegression.test_acceptance_two_same_named_projects
 - 存储失败：`--db` 指向已有目录时退出码 1、stdout 为空、stderr 含
   `storage failure` 且无回溯，不污染既有临时库。
 
+# project-rename --from 预期原名称回归测试
+
+`test_project_rename_from.py` 针对
+`project-rename <项目标识> <新名称> [--from <预期原名称>]` 的原名称校验，
+是对现有项目改名流程的补充回归：数据准备、改名与结果核对全部经公开命令完成
+（`project-create` / `task-create` / `task-move` / `project-rename` /
+`project-list` / `task-list`），不直接写数据库，运行方式同其他回归：
+
+```bash
+python3 test_project_rename_from.py
+python3 -m unittest test_project_rename_from -v
+python3 test_project_rename_from.py \
+    ProjectRenameFromRegression.test_acceptance_match_then_repeat_conflicts
+```
+
+- 用户指定的验收场景端到端覆盖：两个同名项目 `研发`，前者有一条 doing
+  任务、后者无任务；`project-rename 1 "  研发 API  " --from "  研发  "`
+  退出码 0、stderr 为空、stdout 为名称 `研发 API` 的前者对象（只含
+  `id` / `name`，标识原样），`project-list --query API` 只返回前者，
+  前者任务的标识、标题、状态、所属项目与后者空任务列表均保持不变；
+  紧接着重复同一请求退出码 2、stdout 为空、stderr 同时说明已保存的当前
+  名称 `研发 API` 与处理后的预期名称 `研发`，查询结果与任务数据不变。
+- 新名称处理后等于当前名称时：预期匹配则成功返回原项目、不新增记录；
+  预期不匹配仍拒绝（即使新名称与当前名称相同）。
+- 逐字匹配语义：`--from` 与新名称都只去除首尾空白，内部空白、大小写、
+  中文、`%`、`_`、引号原样保留；大小写或内部空白不同即拒绝，不做模糊
+  匹配；标识允许前导零（`0001` 与 `1` 等价）。
+- 拒绝路径：预期原名称或新名称为空字符串/纯空白、`--from` 缺值、必需
+  位置参数缺失、项目标识为 0 / 负数 / 非数字 / `9223372036854775808` /
+  范围内不存在的标识，均退出码 2、stdout 为空、stderr 说明原因且无回溯，
+  拒绝前后两个项目与任务列表完全一致。
+- 省略 `--from` 时保留直接改名的现有规则：允许重名与同名称提交。
+- 数据库无法打开（如 `--db` 指向已有目录）时退出码 1、stdout 为空、
+  stderr 含 `storage failure` 且无回溯。
+
 # project-stats 项目任务状态汇总回归测试
 
 `test_project_stats.py` 针对 `project-stats <项目标识>`，数据准备与结果核对全部
