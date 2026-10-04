@@ -296,6 +296,51 @@ python3 test_task_transfer.py \
 - 不依赖 JSON 键序或错误文案逐字拼写；失败时打印命令行输入、实际退出码、
   stdout、stderr 及预期差异。
 
+# task-transfer --from 预期来源项目回归测试
+
+`test_task_transfer_from.py` 针对
+`task-transfer <任务标识> <目标项目标识> [--from <来源项目标识>]` 的来源项目
+校验，数据准备、转移与结果核对全部经公开命令完成（`project-create` /
+`task-create` / `task-move` / `task-transfer` / `task-show` / `task-list` /
+`project-stats` / `project-list`），不直接读写数据库，运行方式同其他回归：
+
+```bash
+python3 test_task_transfer_from.py
+python3 -m unittest test_task_transfer_from -v
+python3 -m unittest discover -p 'test_task_transfer_from.py' -v
+python3 test_task_transfer_from.py \
+    TaskTransferFromRegression.test_acceptance_transfer_then_repeat_conflicts
+```
+
+- 用户指定的验收场景端到端覆盖：项目甲 alpha 准备 doing 的目标任务 T 与
+  todo 的对照任务 S（同标题），项目乙 beta 准备一条与 T 同标题的 todo 任务 U；
+  `task-transfer T 乙 --from 甲` 退出码 0、stderr 为空、stdout 只有一个与
+  `task-show` 结构一致的任务对象，仅所属项目改为乙，标识、标题与 doing
+  状态保留；紧接着重复同一请求退出码 2、stdout 为空、stderr 同时指出当前
+  所属乙与预期来源甲的标识且无 Python 回溯。独立 `task-show`、两项目
+  `task-list` 与 `project-stats` 确认拒绝前后结果完全一致：T 仍在乙且为
+  doing、S 与 U 未变、两项目统计不变、项目名称不变，任务总数始终为三条
+  （不复制、不新增），成功响应均与随后的独立查询一致。
+- 前导零边界：任务、目标项目、来源项目标识带前导零时按数值解析与比较
+  （`0001`/`0002` 与 `1`/`2` 等价，`00999` 与 `999` 等价），重复请求的
+  归属错误信息中按数值出现当前与预期标识。
+- 目标就是当前所属项目：来源匹配时成功返回原任务、不新增记录（两项目
+  列表、统计与项目清单与操作前完全一致），来源不匹配（`--from` 写成乙）
+  时仍按退出码 2 拒绝且拒绝前后快照相同。
+- 来源标识合法但项目不存在（999，含 `00999` 同值写法）时按归属不匹配
+  拒绝，不创建该项目、不移动任务；一般归属不匹配（任务在甲却以乙为
+  预期来源）同样退出码 2，三条任务完整对象不变。
+- `--from` 缺值、零与全零、非数字（`abc`、`2x`、`1.5`、带空白）、
+  `9223372036854775808` 越界，均退出码 2、stdout 为空、stderr 说明对应
+  原因（非正整数或超出支持范围）且无回溯；每次拒绝前后 `task-show`、
+  两项目 `task-list`、`project-stats` 与项目清单完全相同，项目仍为两个、
+  任务仍为三条。
+- 省略 `--from` 时保留原有直接转移语义：不检查来源即可转入乙，再次省略
+  `--from` 仍可直接转回甲，统计随归属变化、总数不变。
+- 不依赖 JSON 键序或错误文案逐字拼写（stderr 中的标识以是否出现对应
+  十进制数字判断）；失败时打印输入参数、实际退出码、stdout、stderr 及
+  预期差异。
+
 # project-create 创建项目回归测试
 `test_project_create.py` 针对 `project-create <项目名称>`，数据准备、创建与
 结果核对全部经公开命令完成（`project-create` / `task-create` / `task-move` /
