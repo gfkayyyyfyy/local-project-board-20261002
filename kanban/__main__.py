@@ -15,6 +15,10 @@
   task-rename <任务标识> <新标题>     修改任务标题，保留标识、所属项目与状态
   task-show <任务标识>               按跨项目唯一的任务标识读取单条任务，
                                       无需先知道所属项目，查询不改动数据
+  task-transfer <任务标识> <目标项目标识>
+      将单条任务转移到已有项目：只凭跨项目唯一的任务标识定位任务，
+      仅修改所属项目，任务标识、标题、状态原样保留；目标就是当前所属
+      项目时仍成功返回原任务，不新增记录，不复制任务，不创建项目
   task-list <项目标识> [--status 状态]... [--query 关键词]
       按任务标识升序列出项目任务，可按状态和标题关键词（大小写敏感的连续子串）
       筛选；--status 可在同一次调用中重复传入，每次接收一个状态，多个状态取并集，
@@ -188,15 +192,16 @@ def cmd_task_create(conn, args):
 
 
 def update_task(conn, args, plan_change, check_current=None):
-    """task-move / task-rename 共用的单任务修改流程。
+    """task-move / task-rename / task-transfer 共用的单任务修改流程。
 
     依次完成：解析任务标识；由 plan_change() 校验本次修改的取值并返回
     （更新列, 新值），校验失败直接以退出码 2 拒绝；按标识定位目标任务
     （不存在则拒绝）；若提供 check_current()，再用已保存的任务对象做
-    一次业务校验（如 task-move --from 的预期当前状态），不满足则以
+    一次业务校验（如 task-move --from 的预期当前状态、task-transfer
+    的目标项目存在性），不满足则以
     退出码 2 拒绝且不写库；仅当保存值确实变化时才写库提交；最后输出与
-    task-show 结构一致的单个任务对象（保存后的最新值）。任务标识、
-    所属项目及其余字段保持不变，不新增记录，不影响其他任务。
+    task-show 结构一致的单个任务对象（保存后的最新值）。除本次修改的
+    字段外，任务标识与其余字段保持不变，不新增记录，不影响其他任务。
     """
     task_id = parse_positive_int(args.task_id, "task id")
     column, value = plan_change()
@@ -211,7 +216,7 @@ def update_task(conn, args, plan_change, check_current=None):
         if check_current is not None:
             check_current(task)
         if task[column] != value:
-            # column 只取自下方两个命令的内部常量（"status" / "title"）
+            # column 只取自下方三个命令的内部常量（"status" / "title" / "project_id"）
             conn.execute(
                 "UPDATE tasks SET " + column + " = ? WHERE id = ?",
                 (value, task_id),
@@ -274,6 +279,21 @@ def cmd_task_show(conn, args):
     except sqlite3.Error as exc:
         storage_error(str(exc))
     emit(task_object(row))
+
+
+def cmd_task_transfer(conn, args):
+    target = {}
+
+    def plan_change():
+        target["project_id"] = parse_positive_int(args.project_id, "project id")
+        return "project_id", target["project_id"]
+
+    def check_current(task):
+        # 目标项目必须已存在；目标就是当前所属项目时同样成功，
+        # 由 update_task 跳过实际写入，不新增记录
+        require_project(conn, target["project_id"])
+
+    update_task(conn, args, plan_change, check_current)
 
 
 def normalize_query(raw):
@@ -431,6 +451,11 @@ def build_parser():
     p = sub.add_parser("task-show", help="按标识读取单条任务")
     p.add_argument("task_id", help="任务标识（正整数，允许前导零）")
     p.set_defaults(func=cmd_task_show)
+
+    p = sub.add_parser("task-transfer", help="将任务转移到已有项目")
+    p.add_argument("task_id", help="任务标识（正整数，允许前导零）")
+    p.add_argument("project_id", help="目标项目标识（正整数，允许前导零）")
+    p.set_defaults(func=cmd_task_transfer)
 
     p = sub.add_parser("task-list", help="列出项目任务")
     p.add_argument("project_id", help="项目标识（正整数）")

@@ -253,6 +253,38 @@ python3 test_task_show.py \
   且无回溯；父目录存在而数据库文件不存在时沿用自动建库行为创建空库，
   随后因任务不存在退出码 2，库中无任何项目或任务。
 
+# task-transfer 跨项目转移任务回归测试
+
+`test_task_transfer.py` 针对 `task-transfer <任务标识> <目标项目标识>`，
+数据准备、转移与结果核对全部经公开命令完成（`project-create` /
+`task-create` / `task-move` / `task-transfer` / `task-list` /
+`project-stats` / `project-list`），不直接读写数据库：
+
+```bash
+python3 test_task_transfer.py
+python3 -m unittest test_task_transfer -v
+python3 test_task_transfer.py \
+    TaskTransferRegression.test_transfer_to_other_project
+```
+
+- 成功路径：doing 状态任务转移到另一项目，退出码 0、stderr 为空、
+  stdout 为与 `task-show` 结构一致的单个 JSON 对象（只含 `id` /
+  `project_id` / `title` / `status`），仅 `project_id` 变为目标项目；
+  独立命令进程 `task-list` 查询同一数据库确认归属已落库且按标识升序，
+  来源项目不再包含该任务、目标项目原有同标题任务与来源项目对照任务
+  完整对象不变、项目名称不变、任务总数不变（不复制）；`0001`/`0002`
+  前导零写法与数值等价；目标就是当前所属项目时成功返回原任务且不新增
+  记录；目标项目为空（新建无任务项目）也允许转移；`project-stats`
+  按新归属统计（来源扣除、目标计入）。
+- 拒绝路径：缺少任务标识或目标项目标识、标识非数字、零或全零、
+  `9223372036854775808` 越界、任务不存在、目标项目不存在，均退出码 2、
+  stdout 为空、stderr 说明对应原因且无回溯，失败前后两个项目的任务与
+  项目快照完全一致。
+- 存储失败：`--db` 指向不存在父目录下的文件时退出码 1、stdout 为空、
+  stderr 说明存储失败且无回溯。
+- 不依赖 JSON 键序或错误文案逐字拼写；失败时打印命令行输入、实际退出码、
+  stdout、stderr 及预期差异。
+
 # project-create 创建项目回归测试
 `test_project_create.py` 针对 `project-create <项目名称>`，数据准备、创建与
 结果核对全部经公开命令完成（`project-create` / `task-create` / `task-move` /
