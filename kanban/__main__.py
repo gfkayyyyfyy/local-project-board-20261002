@@ -12,8 +12,10 @@
   task-rename <任务标识> <新标题>     修改任务标题，保留标识、所属项目与状态
   task-show <任务标识>               按跨项目唯一的任务标识读取单条任务，
                                       无需先知道所属项目，查询不改动数据
-  task-list <项目标识> [--status 状态] [--query 关键词]
-      按任务标识升序列出项目任务，可按状态和标题关键词（大小写敏感的连续子串）筛选
+  task-list <项目标识> [--status 状态]... [--query 关键词]
+      按任务标识升序列出项目任务，可按状态和标题关键词（大小写敏感的连续子串）
+      筛选；--status 可在同一次调用中重复传入，每次接收一个状态，多个状态取并集，
+      再与项目范围及标题关键词条件取交集；省略 --status 时返回全部状态的任务
   project-stats <项目标识> [--status 状态] [--query 关键词]
       汇总项目当前各状态任务数量，可按状态精确匹配和标题关键词
       （大小写敏感的连续子串）筛选，两者同时使用时取交集，
@@ -267,7 +269,7 @@ def normalize_query(raw):
 
 
 def validate_status(status):
-    """校验可选的 --status 精确匹配值；省略（None）时不加状态条件。"""
+    """校验可选的单个 --status 精确匹配值；省略（None）时不加状态条件。"""
     if status is not None and status not in VALID_STATUSES:
         usage_error(
             f"invalid status {status!r}; expected one of: "
@@ -276,17 +278,36 @@ def validate_status(status):
     return status
 
 
-def task_query_conditions(project_id, keyword, status=None):
+def validate_statuses(statuses):
+    """校验 task-list 可重复传入的 --status 列表；省略（None）时不加状态条件。
+
+    每次出现的值都按原样校验（不去除空白、不转换大小写），只接受
+    todo/doing/done；任意一个值非法即拒绝整次查询，即使其余值合法。
+    """
+    if statuses is None:
+        return None
+    for status in statuses:
+        if status not in VALID_STATUSES:
+            usage_error(
+                f"invalid status {status!r}; expected one of: "
+                + ", ".join(VALID_STATUSES)
+            )
+    return statuses
+
+
+def task_query_conditions(project_id, keyword, statuses=None):
     """组装项目任务查询共用的 WHERE 片段与绑定参数。
 
-    固定按项目标识过滤；status 非空时追加状态精确匹配；keyword 非 None 时
-    追加 INSTR(title, ?) > 0 的大小写敏感连续子串条件。各条件之间为交集。
+    固定按项目标识过滤；statuses 非空时追加状态精确匹配的并集条件（IN），
+    重复状态自然去重，与参数先后顺序无关；keyword 非 None 时追加
+    INSTR(title, ?) > 0 的大小写敏感连续子串条件。各条件之间为交集。
     """
     clauses = ["project_id = ?"]
     params = [project_id]
-    if status is not None:
-        clauses.append("status = ?")
-        params.append(status)
+    if statuses:
+        unique = list(dict.fromkeys(statuses))
+        clauses.append("status IN (" + ", ".join("?" * len(unique)) + ")")
+        params.extend(unique)
     if keyword is not None:
         # INSTR 为大小写敏感的连续子串匹配，%、_、引号等均按普通字符处理
         clauses.append("INSTR(title, ?) > 0")
@@ -294,21 +315,26 @@ def task_query_conditions(project_id, keyword, status=None):
     return clauses, params
 
 
-def prepare_task_query(args, *, status_filter=False):
+def prepare_task_query(args, *, multi_status=False):
     """task-list / project-stats 共用的查询准备：
 
-    解析项目标识、规范化标题关键词、按需校验状态，并返回项目标识与 WHERE
+    解析项目标识、规范化标题关键词、校验状态（multi_status 为 True 时接受
+    可重复传入的状态列表，否则只接受单个状态），并返回项目标识与 WHERE
     片段/参数。项目是否存在由调用方在数据库访问阶段统一确认。
     """
     project_id = parse_positive_int(args.project_id, "project id")
     keyword = normalize_query(args.query)
-    status = validate_status(args.status) if status_filter else None
-    clauses, params = task_query_conditions(project_id, keyword, status)
+    if multi_status:
+        statuses = validate_statuses(args.status)
+    else:
+        status = validate_status(args.status)
+        statuses = [status] if status is not None else None
+    clauses, params = task_query_conditions(project_id, keyword, statuses)
     return project_id, clauses, params
 
 
 def cmd_task_list(conn, args):
-    project_id, clauses, params = prepare_task_query(args, status_filter=True)
+    project_id, clauses, params = prepare_task_query(args, multi_status=True)
     try:
         require_project(conn, project_id)
         rows = conn.execute(
@@ -322,7 +348,7 @@ def cmd_task_list(conn, args):
 
 
 def cmd_project_stats(conn, args):
-    project_id, clauses, params = prepare_task_query(args, status_filter=True)
+    project_id, clauses, params = prepare_task_query(args)
     counts = dict.fromkeys(VALID_STATUSES, 0)
     try:
         require_project(conn, project_id)
@@ -392,7 +418,9 @@ def build_parser():
     p.add_argument("project_id", help="项目标识（正整数）")
     p.add_argument(
         "--status",
-        help="可选状态筛选：todo / doing / done；省略时返回全部任务",
+        action="append",
+        help="可选状态筛选：todo / doing / done；可重复传入，多个状态取并集；"
+             "省略时返回全部任务",
     )
     p.add_argument(
         "--query",
