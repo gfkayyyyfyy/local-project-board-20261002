@@ -640,3 +640,50 @@ python3 test_project_stats_multi_status.py \
   说明原因且无回溯，已有项目与任务不变。
 - 存储失败：`--db` 指向已有目录时退出码 1、stdout 为空、stderr 含
   `storage failure` 且无回溯。
+
+# project-export 单项目导出回归测试
+
+`test_project_export.py` 针对
+`project-export <项目标识>` 的单项目 JSON 导出，数据准备、修改与结果核对
+全部经公开命令完成（`project-create` / `task-create` / `task-move` /
+`task-rename` / `project-rename` / `task-transfer` / `project-list` /
+`task-list` / `project-stats`），不直接写数据库（仅一处只读连接核对空库），
+运行方式同其他回归：
+
+```bash
+python3 test_project_export.py
+python3 -m unittest test_project_export -v
+python3 test_project_export.py \
+    ProjectExportRegression.test_acceptance_two_same_named_projects
+```
+
+- 用户指定的验收场景端到端覆盖：两个同名项目 `研发`，项目 1 有任务 1
+  `整理API`（doing）与任务 2 `文档`（todo），项目 2 另有一条 `整理API`
+  （done）；`project-export 1` 的 `project` 恰为 `{"id":1,"name":"研发"}`，
+  `tasks` 恰好包含任务 1、2（标识、所属项目、标题、状态与现有查询一致，
+  按标识数值升序），项目 2 的任务不出现；紧接着 `project-export 0001`
+  取得逐字节相同的内容；项目 2 的导出只含它自己的 done 任务。
+- 输出结构：成功时退出码 0、stderr 为空、stdout 只有一个 JSON 对象，
+  顶层恰好含 `project` 与 `tasks`；`project` 与 `project-list` 单项完全
+  一致（只含 `id` / `name`），`tasks` 元素与 `task-list` 任务对象完全
+  一致（只含 `id` / `project_id` / `title` / `status`），按任务标识
+  数值升序；包含项目全部 todo/doing/done 任务，同标题任务各自保留；
+  存在但无任务的项目返回项目对象与空数组。
+- 名称与标题按保存值原样返回：内部双空格、中文、大小写、`%`、`_`、引号
+  均不改变。
+- 只读与当前值：成功导出与业务失败前后 `project-list` / 两项目
+  `task-list` / `project-stats` 完整快照不变，重复导出结果一致；经
+  `project-rename`、`task-rename`、`task-move`、`task-transfer` 修改后
+  再导出，反映当前名称、标题、状态与归属（任务转入空项目后，原项目导出
+  含该任务、目标项目导出为空数组）。
+- 标识规则：`0001` 及前导五千个零的 `1` 与 `1` 等价；零、全零、负数、
+  非数字、小数/科学计数法、带正负号或首尾空白、全角数字为标识无效；
+  `9223372036854775808`、五千个 9 及其前导零同值写法为越界；上限本身与
+  范围内不存在标识（如 999）为项目不存在；三类均退出码 2、stdout 为空、
+  stderr 分别说明标识无效、超出支持范围或 `does not exist` 且无回溯，
+  拒绝前后快照完全一致；缺少项目标识、缺少 `--db` 或其路径值同样退出
+  码 2。
+- 存储与初始化：`--db` 指向已有目录、父目录不存在、文件存在但不是可用
+  SQLite 数据库时退出码 1、stdout 为空、stderr 含 `storage failure`
+  且无回溯；父目录存在而数据库文件不存在时沿用自动建库行为创建空库，
+  随后因项目不存在退出码 2，只读连接核对库中无任何项目或任务。

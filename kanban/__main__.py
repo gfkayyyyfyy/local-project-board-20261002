@@ -39,6 +39,12 @@
       状态，多个状态取并集，再与项目范围及标题关键词条件取交集；
       省略 --status 时统计全部状态，
       输出 {"project_id", "total", "todo", "doing", "done"}
+  project-export <项目标识>
+      只读导出单个项目及其全部任务：输出 {"project", "tasks"}，project 为
+      project-list 中的单个项目结构 {"id", "name"}，tasks 为该项目全部
+      todo/doing/done 任务（task-list 中的任务结构），按任务标识数值升序；
+      其他项目任务不混入，存在但无任务的项目返回 project 与空数组；
+      项目不存在退出码 2，导出不改动任何数据
 
 退出码：0 成功；2 参数或业务校验失败；1 存储（数据库）失败。
 """
@@ -437,6 +443,30 @@ def cmd_task_list(conn, args):
     emit([task_object(row) for row in rows])
 
 
+def cmd_project_export(conn, args):
+    project_id = parse_positive_int(args.project_id, "project id")
+    try:
+        # 项目不存在时按业务校验失败拒绝（退出码 2），不返回空壳对象
+        row = conn.execute(
+            "SELECT id, name FROM projects WHERE id = ?", (project_id,)
+        ).fetchone()
+        if row is None:
+            usage_error(f"project {project_id} does not exist")
+        # 只读：一次取项目与该项目全部任务（todo/doing/done），
+        # 其他项目任务不串入；按任务标识数值升序，空项目得到空数组
+        task_rows = conn.execute(
+            "SELECT id, project_id, title, status FROM tasks "
+            "WHERE project_id = ? ORDER BY id ASC",
+            (project_id,),
+        ).fetchall()
+    except sqlite3.Error as exc:
+        storage_error(str(exc))
+    emit({
+        "project": {"id": row[0], "name": row[1]},
+        "tasks": [task_object(row) for row in task_rows],
+    })
+
+
 def cmd_project_stats(conn, args):
     project_id, clauses, params = prepare_task_query(args)
     counts = dict.fromkeys(VALID_STATUSES, 0)
@@ -566,6 +596,13 @@ def build_parser():
         help="可选标题关键词：去除首尾空白后按大小写敏感的连续子串匹配标题",
     )
     p.set_defaults(func=cmd_project_stats)
+
+    p = sub.add_parser(
+        "project-export",
+        help="导出单个项目及其全部任务（只读 JSON 导出）",
+    )
+    p.add_argument("project_id", help="项目标识（正整数，允许前导零）")
+    p.set_defaults(func=cmd_project_export)
 
     return parser
 
