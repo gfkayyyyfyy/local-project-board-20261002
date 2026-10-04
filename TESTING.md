@@ -128,6 +128,39 @@ python3 test_task_rename.py \
 - 不依赖 JSON 键序或错误文案逐字拼写；失败时打印输入、退出码、stdout、
   stderr 及预期与实际差异。
 
+# task-rename --from 预期原标题回归测试
+
+`test_task_rename_from.py` 针对
+`task-rename <任务标识> <新标题> [--from <预期原标题>]` 的原标题校验，
+是对现有改名流程的补充回归：数据准备、改名与结果核对全部经公开命令完成
+（`project-create` / `task-create` / `task-move` / `task-rename` /
+`task-show` / `task-list`），不直接写数据库，运行方式同其他回归：
+
+```bash
+python3 test_task_rename_from.py
+python3 -m unittest test_task_rename_from -v
+python3 test_task_rename_from.py \
+    TaskRenameFromRegression.test_acceptance_match_then_repeat_conflicts
+```
+
+- 用户指定的验收场景端到端覆盖：两个同标题任务，任务 1（项目 1）为
+  doing、任务 2 为 todo；`task-rename 0001 "修复 API" --from " 设计 API "`
+  退出码 0、stderr 为空、stdout 为标题 `修复 API` 的任务 1 对象（标识、
+  项目、doing 状态原样），再次执行同一命令退出码 2、stdout 为空、stderr
+  同时说明已保存的当前标题 `修复 API` 与处理后的预期标题 `设计 API`，
+  任务 1 仍为 `修复 API`、同标题对照任务保持原值，任务数不变。
+- 新标题处理后等于当前标题时：预期匹配则成功返回原任务、不新增记录；
+  预期不匹配仍拒绝。
+- 逐字匹配语义：`--from` 与新标题都只去除首尾空白，内部空白、大小写、
+  中文、`%`、`_`、引号原样保留；大小写或内部空白不同即拒绝，不做模糊
+  匹配；标识允许前导零（`0001` 与 `1` 等价）。
+- 拒绝路径：预期原标题或新标题为空字符串/纯空白、`--from` 缺值、必需
+  位置参数缺失、任务标识为 0 / 负数 / 非数字 / `9223372036854775808` /
+  范围内不存在的标识，均退出码 2、stdout 为空、stderr 说明原因且无回溯，
+  拒绝前后任务列表完全一致。
+- 省略 `--from` 时保留直接改名的现有规则：允许重名与同标题提交。
+- 数据库无法打开时退出码 1、stdout 为空、stderr 含 `storage failure`。
+
 # task-move --from 预期当前状态回归测试
 
 `test_task_move_from.py` 针对 `task-move <任务标识> <状态> [--from <状态>]`

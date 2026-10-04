@@ -12,7 +12,11 @@
       在 todo/doing/done 之间移动任务；可选 --from 指定本次移动预期的
       当前状态，仅当任务已保存的状态与 --from 完全相同时才设置目标状态，
       省略 --from 时三种合法状态之间可直接转换
-  task-rename <任务标识> <新标题>     修改任务标题，保留标识、所属项目与状态
+  task-rename <任务标识> <新标题> [--from <预期原标题>]
+      修改任务标题，保留标识、所属项目与状态；可选 --from 指定本次改名
+      预期的当前标题，预期原标题与新标题都先去除首尾空白（内部空白、
+      大小写、中文、%、_、引号原样保留），仅当任务已保存的标题与处理后
+      的预期原标题逐字相等时才保存新标题，省略 --from 时不检查原标题
   task-show <任务标识>               按跨项目唯一的任务标识读取单条任务，
                                       无需先知道所属项目，查询不改动数据
   task-transfer <任务标识> <目标项目标识> [--from <来源项目标识>]
@@ -260,13 +264,33 @@ def cmd_task_move(conn, args):
 
 
 def cmd_task_rename(conn, args):
+    expected = {}
+
     def plan_change():
         title = args.title.strip()
         if not title:
             usage_error("task title must not be empty")
+        # 预期原标题同样先去除首尾空白，内部空白、大小写、中文、%、_、引号
+        # 原样保留；去空白后为空按参数错误拒绝
+        if args.from_title is not None:
+            expected["title"] = args.from_title.strip()
+            if not expected["title"]:
+                usage_error("expected original title (--from) must not be empty")
+        else:
+            expected["title"] = None
         return "title", title
 
-    update_task(conn, args, plan_change)
+    def check_current(task):
+        # 提供 --from 时，仅当任务已保存的标题与处理后的预期原标题逐字相等
+        # 才允许改名，不做模糊匹配；新标题与当前标题相同但预期不匹配也拒绝
+        expected_title = expected["title"]
+        if expected_title is not None and task["title"] != expected_title:
+            usage_error(
+                f"task {task['id']} current title is {task['title']!r}, "
+                f"but --from expected {expected_title!r}"
+            )
+
+    update_task(conn, args, plan_change, check_current)
 
 
 def cmd_task_show(conn, args):
@@ -463,6 +487,14 @@ def build_parser():
     p = sub.add_parser("task-rename", help="修改任务标题")
     p.add_argument("task_id", help="任务标识（正整数）")
     p.add_argument("title", help="新任务标题")
+    p.add_argument(
+        "--from",
+        dest="from_title",
+        metavar="TITLE",
+        help="可选的预期原标题：与新标题一样先去除首尾空白（内部空白、"
+             "大小写、中文、%%、_、引号原样保留），仅当任务已保存的标题与"
+             "处理后的预期原标题逐字相等时才改名；省略时不检查原标题",
+    )
     p.set_defaults(func=cmd_task_rename)
 
     p = sub.add_parser("task-show", help="按标识读取单条任务")
