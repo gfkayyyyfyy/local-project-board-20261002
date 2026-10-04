@@ -220,6 +220,37 @@ python3 test_task_move_then_rename.py \
 - 不依赖 JSON 键序或错误文案逐字拼写；失败时打印输入、退出码、stdout、
   stderr 及预期差异。
 
+# task-move / task-rename 连续修改带 --from 校验回归测试
+
+`test_task_move_rename_from_chain.py` 在现有直接连续修改回归之上，补充两次
+修改都携带 `--from` 预期值的链式场景，数据准备、修改与结果核对全部经公开
+命令完成（`project-create` / `task-create` / `task-move` / `task-rename` /
+`task-show` / `task-list`），不直接操作数据库：
+
+```bash
+python3 test_task_move_rename_from_chain.py
+python3 -m unittest test_task_move_rename_from_chain -v
+python3 test_task_move_rename_from_chain.py \
+    TaskMoveRenameFromChainRegression.test_move_then_rename_with_from
+```
+
+- 两个场景各自使用全新临时数据库：两个项目各一条标题为 `整理 API`、状态
+  todo 的任务，标识取自创建结果。场景一先 `task-move <id> doing --from
+  todo` 再 `task-rename <id> " 修复 API " --from " 整理 API "`；场景二在
+  独立数据中交换顺序（先按原标题改名、再按原状态移动），并使用任务标识
+  的前导零写法。两场景最终结果相同：标题 `修复 API`、状态 doing。
+- 每次成功均退出码 0、stderr 为空、stdout 为与 `task-show` 结构一致的
+  单个任务对象（只含 `id` / `project_id` / `title` / `status`），仅本次
+  修改的字段改变、其余字段保留；独立命令进程的 `task-show` / `task-list`
+  读到相同保存值，同标题对照任务始终保持 todo 和原标题，任务数量、标识
+  与归属不变。
+- 每个场景完成后重提原来的带 `--from` 移动与改名请求：目标值已等于当前
+  值、预期来源仍为旧值，两次均退出码 2、stdout 为空、stderr 分别说明当前
+  状态或标题及不匹配的预期值且无回溯；每次拒绝前后目标任务与两个项目的
+  完整任务列表完全一致。
+- 不依赖 JSON 键序或错误文案逐字拼写；失败时打印输入、实际退出码、
+  stdout、stderr 及预期差异。
+
 # task-create 创建任务回归测试
 
 `test_task_create.py` 针对 `task-create <项目标识> <任务标题>`，数据准备、
