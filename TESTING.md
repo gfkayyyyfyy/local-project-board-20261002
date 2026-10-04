@@ -351,3 +351,40 @@ python3 test_project_stats_query.py \
   `does not exist`）；前导零（含五千个）按数值等价；拒绝前后统计不变。
 - 存储失败：`--db` 指向已有目录时退出码 1、stdout 为空、stderr 含
   `storage failure` 且无回溯。
+
+# project-stats 状态筛选回归测试
+
+`test_project_stats_status.py` 针对
+`project-stats <项目标识> [--status 状态] [--query 关键词]`，数据准备与结果
+核对全部经公开命令完成（`project-create` / `task-create` / `task-move` /
+`task-rename` / `task-list`），不直接写数据库，运行方式同其他回归：
+
+```bash
+python3 test_project_stats_status.py
+python3 -m unittest test_project_stats_status -v
+python3 test_project_stats_status.py \
+    ProjectStatsStatusRegression.test_acceptance_scenario
+```
+
+- 用户指定的验收场景端到端覆盖：项目 1 两条 doing 的 `Fix API`、一条 todo 的
+  `Fix API`、一条 doing 的 `Fix api`，项目 2 一条 doing 的 `Fix API`；
+  `project-stats 1 --status doing --query API` 恰为
+  `{"project_id":1,"total":2,"todo":0,"doing":2,"done":0}`，
+  `task-list 1 --status doing --query API` 恰好返回这两条任务，项目 2 同名
+  任务不串入。
+- 带 `--status` 时 `total` 等于命中任务数、所选状态数量与 `total` 相等，
+  另外两个状态为 0；与 `--query` 同时使用取交集；关键词语义与
+  `task-list --query` 一致（去首尾空白、保留内部空白、大小写敏感连续子串，
+  中文、`%`、`_`、引号为普通字符，只匹配标题不匹配项目名称）；同标题任务按
+  标识分别计数；空项目或无命中成功返回四个 0。省略 `--status` 时统计范围
+  保持为项目全部任务（或仅 `--query` 命中），行为与扩展前一致。
+- 统计反映当前保存值：`task-move`、`task-rename` 后按最新状态与标题计数，
+  其他项目不受影响；重复查询结果一致且只读，查询前后 `task-list` /
+  `project-stats` 快照不变；独立进程查询同一路径结果相同。
+- 拒绝路径：非法状态（大小写变化、带首尾空白、空字符串、未知拼写）、
+  `--status` 缺值、空关键词、缺少项目标识、标识为 0 / 负数 / 非数字 /
+  `9223372036854775808` / 五千个 9 等均退出码 2、stdout 为空、stderr 说明
+  原因（越界说明范围、范围内不存在说明 `does not exist`）；前导零（含
+  五千个）按数值等价；拒绝前后统计不变。
+- 存储失败：`--db` 指向已有目录时退出码 1、stdout 为空、stderr 含
+  `storage failure` 且无回溯。
