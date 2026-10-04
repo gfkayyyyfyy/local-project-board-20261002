@@ -15,10 +15,12 @@
   task-rename <任务标识> <新标题>     修改任务标题，保留标识、所属项目与状态
   task-show <任务标识>               按跨项目唯一的任务标识读取单条任务，
                                       无需先知道所属项目，查询不改动数据
-  task-transfer <任务标识> <目标项目标识>
+  task-transfer <任务标识> <目标项目标识> [--from <来源项目标识>]
       将单条任务转移到已有项目：只凭跨项目唯一的任务标识定位任务，
       仅修改所属项目，任务标识、标题、状态原样保留；目标就是当前所属
-      项目时仍成功返回原任务，不新增记录，不复制任务，不创建项目
+      项目时仍成功返回原任务，不新增记录，不复制任务，不创建项目；
+      可选 --from 指定预期的当前所属项目，仅当任务已保存的所属项目
+      与之按数值相等时才转移，省略 --from 时不检查来源
   task-list <项目标识> [--status 状态]... [--query 关键词]
       按任务标识升序列出项目任务，可按状态和标题关键词（大小写敏感的连续子串）
       筛选；--status 可在同一次调用中重复传入，每次接收一个状态，多个状态取并集，
@@ -286,12 +288,27 @@ def cmd_task_transfer(conn, args):
 
     def plan_change():
         target["project_id"] = parse_positive_int(args.project_id, "project id")
+        if args.from_project is not None:
+            target["from_project"] = parse_positive_int(
+                args.from_project, "--from project id"
+            )
+        else:
+            target["from_project"] = None
         return "project_id", target["project_id"]
 
     def check_current(task):
         # 目标项目必须已存在；目标就是当前所属项目时同样成功，
         # 由 update_task 跳过实际写入，不新增记录
         require_project(conn, target["project_id"])
+        # 提供 --from 时，仅当任务当前所属项目与预期来源按数值相等才允许
+        # 转移；目标就是当前项目时同样检查。预期来源不存在也按归属不匹配
+        # 拒绝，不创建该项目
+        expected = target["from_project"]
+        if expected is not None and task["project_id"] != expected:
+            usage_error(
+                f"task {task['id']} current project is {task['project_id']}, "
+                f"but --from expected project {expected}"
+            )
 
     update_task(conn, args, plan_change, check_current)
 
@@ -455,6 +472,13 @@ def build_parser():
     p = sub.add_parser("task-transfer", help="将任务转移到已有项目")
     p.add_argument("task_id", help="任务标识（正整数，允许前导零）")
     p.add_argument("project_id", help="目标项目标识（正整数，允许前导零）")
+    p.add_argument(
+        "--from",
+        dest="from_project",
+        metavar="PROJECT_ID",
+        help="可选的预期来源项目标识（正整数，允许前导零）：仅当任务当前"
+             "所属项目与之按数值相等时才转移；省略时不检查来源",
+    )
     p.set_defaults(func=cmd_task_transfer)
 
     p = sub.add_parser("task-list", help="列出项目任务")
