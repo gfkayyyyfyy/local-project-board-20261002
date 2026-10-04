@@ -15,6 +15,10 @@
   task-rename <任务标识> <新标题>     修改任务标题，保留标识、所属项目与状态
   task-show <任务标识>               按跨项目唯一的任务标识读取单条任务，
                                       无需先知道所属项目，查询不改动数据
+  task-transfer <任务标识> <目标项目标识>
+      只凭跨项目唯一的任务标识把任务转移到已有项目，无需输入来源项目；
+      只修改 project_id，任务的 id、title、status 原样保留，不复制任务、
+      不创建项目；目标就是当前所属项目时成功返回原任务且不新增记录
   task-list <项目标识> [--status 状态]... [--query 关键词]
       按任务标识升序列出项目任务，可按状态和标题关键词（大小写敏感的连续子串）
       筛选；--status 可在同一次调用中重复传入，每次接收一个状态，多个状态取并集，
@@ -276,6 +280,45 @@ def cmd_task_show(conn, args):
     emit(task_object(row))
 
 
+def cmd_task_transfer(conn, args):
+    """把单条任务转移到已有项目：只修改 project_id。
+
+    任务由跨项目唯一的任务标识定位，无需来源项目；目标项目按标识定位，
+    必须已存在。任务不存在或目标项目不存在均以退出码 2 拒绝且不写库。
+    目标项目允许没有任务，也允许已有同标题任务，同名项目始终按标识区分。
+    仅当新归属与当前归属不同时才写库提交；目标就是当前所属项目时成功
+    返回原任务且不新增记录。输出与 task-show 结构一致的单个任务对象，
+    任务的 id、title、status 以及其他任务、项目名称均保持不变。
+    """
+    task_id = parse_positive_int(args.task_id, "task id")
+    target_project_id = parse_positive_int(
+        args.project_id, "target project id"
+    )
+    try:
+        row = conn.execute(
+            "SELECT id, project_id, title, status FROM tasks WHERE id = ?",
+            (task_id,),
+        ).fetchone()
+        if row is None:
+            usage_error(f"task {task_id} does not exist")
+        project_row = conn.execute(
+            "SELECT id FROM projects WHERE id = ?", (target_project_id,)
+        ).fetchone()
+        if project_row is None:
+            usage_error(f"project {target_project_id} does not exist")
+        task = task_object(row)
+        if task["project_id"] != target_project_id:
+            conn.execute(
+                "UPDATE tasks SET project_id = ? WHERE id = ?",
+                (target_project_id, task_id),
+            )
+            conn.commit()
+        task["project_id"] = target_project_id
+    except sqlite3.Error as exc:
+        storage_error(str(exc))
+    emit(task)
+
+
 def normalize_query(raw):
     """规范化 --query 关键词（task-list、project-stats、project-list 共用）。
 
@@ -431,6 +474,14 @@ def build_parser():
     p = sub.add_parser("task-show", help="按标识读取单条任务")
     p.add_argument("task_id", help="任务标识（正整数，允许前导零）")
     p.set_defaults(func=cmd_task_show)
+
+    p = sub.add_parser("task-transfer", help="把任务转移到已有项目")
+    p.add_argument("task_id", help="任务标识（正整数，允许前导零）")
+    p.add_argument(
+        "project_id",
+        help="目标项目标识（正整数，允许前导零，必须为已有项目）",
+    )
+    p.set_defaults(func=cmd_task_transfer)
 
     p = sub.add_parser("task-list", help="列出项目任务")
     p.add_argument("project_id", help="项目标识（正整数）")
