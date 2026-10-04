@@ -128,6 +128,38 @@ python3 test_task_rename.py \
 - 不依赖 JSON 键序或错误文案逐字拼写；失败时打印输入、退出码、stdout、
   stderr 及预期与实际差异。
 
+# task-move --from 预期当前状态回归测试
+
+`test_task_move_from.py` 针对 `task-move <任务标识> <状态> [--from <状态>]`
+的来源状态校验，数据准备、移动与结果核对全部经公开命令完成
+（`project-create` / `task-create` / `task-move` / `task-show` /
+`task-list` / `project-stats`），不直接写数据库，运行方式同其他回归：
+
+```bash
+python3 test_task_move_from.py
+python3 -m unittest test_task_move_from -v
+python3 test_task_move_from.py \
+    TaskMoveFromRegression.test_acceptance_match_then_repeat_conflicts
+```
+
+- 用户指定的验收场景端到端覆盖：两个同标题任务，任务 1（项目 1）为
+  doing、任务 2 为 todo；`task-move 1 done --from doing` 退出码 0、
+  stderr 为空、stdout 为状态 done 的任务 1 对象（标识、项目、标题原样），
+  再次执行同一命令退出码 2、stdout 为空、stderr 同时说明当前状态 done 与
+  预期状态 doing，任务 1 仍为 done、任务 2 仍为 todo，统计为
+  todo=1 / doing=0 / done=1。
+- 即使目标状态与当前相同（任务 2 todo，目标 todo，`--from doing`），
+  来源不匹配也拒绝；当前与预期相符且目标等于当前（`--from todo` 目标
+  todo）则成功返回原任务且不新增记录；来源合法但与当前值不同时不创建
+  任务、不改变目标状态；标识允许前导零（`0001` 与 `1` 等价）。
+- 原样拼写校验：`--from` 与目标状态的大小写变化、首尾空白、空字符串、
+  未知值均退出码 2、stdout 为空、stderr 说明状态非法且无回溯；
+  `--from` 缺值、必需位置参数缺失、标识无效/为 0/负数/不存在同样退出码
+  2，拒绝前后 task-show 与 project-stats 不变。
+- 省略 `--from` 时保留三种合法状态之间直接转换（含同状态移动）的现有
+  规则；数据库无法打开时退出码 1、stdout 为空、stderr 含 `storage
+  failure`。
+
 # task-move 后接 task-rename 连续修改回归测试
 
 `test_task_move_then_rename.py` 针对同一任务的连续修改（先 `task-move`

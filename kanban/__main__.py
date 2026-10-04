@@ -8,7 +8,10 @@
   project-rename <项目标识> <新名称>
       修改项目名称，保留标识与已有任务，输出 {"id", "name"}
   task-create <项目标识> <任务标题>   在已有项目下创建任务（初始状态 todo）
-  task-move <任务标识> <状态>         在 todo/doing/done 之间移动任务
+  task-move <任务标识> <状态> [--from <状态>]
+      在 todo/doing/done 之间移动任务；可选 --from 指定本次移动预期的
+      当前状态，仅当任务已保存的状态与 --from 完全相同时才设置目标状态，
+      省略 --from 时三种合法状态之间可直接转换
   task-rename <任务标识> <新标题>     修改任务标题，保留标识、所属项目与状态
   task-show <任务标识>               按跨项目唯一的任务标识读取单条任务，
                                       无需先知道所属项目，查询不改动数据
@@ -184,12 +187,14 @@ def cmd_task_create(conn, args):
           "status": "todo"})
 
 
-def update_task(conn, args, plan_change):
+def update_task(conn, args, plan_change, check_current=None):
     """task-move / task-rename 共用的单任务修改流程。
 
     依次完成：解析任务标识；由 plan_change() 校验本次修改的取值并返回
     （更新列, 新值），校验失败直接以退出码 2 拒绝；按标识定位目标任务
-    （不存在则拒绝）；仅当保存值确实变化时才写库提交；最后输出与
+    （不存在则拒绝）；若提供 check_current()，再用已保存的任务对象做
+    一次业务校验（如 task-move --from 的预期当前状态），不满足则以
+    退出码 2 拒绝且不写库；仅当保存值确实变化时才写库提交；最后输出与
     task-show 结构一致的单个任务对象（保存后的最新值）。任务标识、
     所属项目及其余字段保持不变，不新增记录，不影响其他任务。
     """
@@ -203,6 +208,8 @@ def update_task(conn, args, plan_change):
         if row is None:
             usage_error(f"task {task_id} does not exist")
         task = task_object(row)
+        if check_current is not None:
+            check_current(task)
         if task[column] != value:
             # column 只取自下方两个命令的内部常量（"status" / "title"）
             conn.execute(
@@ -217,16 +224,32 @@ def update_task(conn, args, plan_change):
 
 
 def cmd_task_move(conn, args):
-    def plan_change():
-        status = args.status
-        if status not in VALID_STATUSES:
-            usage_error(
-                f"invalid status {status!r}; expected one of: "
-                + ", ".join(VALID_STATUSES)
-            )
-        return "status", status
+    def invalid_status_error(label, status):
+        usage_error(
+            f"invalid {label} status {status!r}; expected one of: "
+            + ", ".join(VALID_STATUSES)
+        )
 
-    update_task(conn, args, plan_change)
+    def plan_change():
+        # 目标状态与 --from 都按原样拼写精确校验：不去除空白、不转换大小写
+        if args.status not in VALID_STATUSES:
+            invalid_status_error("target", args.status)
+        if args.from_status is not None and args.from_status not in VALID_STATUSES:
+            invalid_status_error("--from", args.from_status)
+        return "status", args.status
+
+    expected_status = args.from_status
+
+    def check_current(task):
+        # 仅当任务已保存的状态与 --from 完全相同时才允许移动；
+        # 目标状态与当前状态相同但来源不匹配时同样拒绝
+        if expected_status is not None and task["status"] != expected_status:
+            usage_error(
+                f"task {task['id']} current status is {task['status']!r}, "
+                f"but --from expected {expected_status!r}"
+            )
+
+    update_task(conn, args, plan_change, check_current)
 
 
 def cmd_task_rename(conn, args):
@@ -391,6 +414,13 @@ def build_parser():
     p = sub.add_parser("task-move", help="移动任务状态")
     p.add_argument("task_id", help="任务标识（正整数）")
     p.add_argument("status", help="目标状态：todo / doing / done")
+    p.add_argument(
+        "--from",
+        dest="from_status",
+        metavar="STATUS",
+        help="可选的预期当前状态：todo / doing / done，仅当任务已保存的状态"
+             "与之完全相同时才移动；省略时三种合法状态之间可直接转换",
+    )
     p.set_defaults(func=cmd_task_move)
 
     p = sub.add_parser("task-rename", help="修改任务标题")
