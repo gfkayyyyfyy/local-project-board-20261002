@@ -128,6 +128,33 @@ python3 test_task_rename.py \
 - 不依赖 JSON 键序或错误文案逐字拼写；失败时打印输入、退出码、stdout、
   stderr 及预期与实际差异。
 
+# task-move 后接 task-rename 连续修改回归测试
+
+`test_task_move_then_rename.py` 针对同一任务的连续修改（先 `task-move`
+再 `task-rename`），数据准备、修改与结果核对全部经公开命令完成
+（`project-create` / `task-create` / `task-move` / `task-rename` /
+`task-show` / `task-list` / `project-stats`），不直接操作数据库：
+
+```bash
+python3 test_task_move_then_rename.py
+python3 -m unittest test_task_move_then_rename -v
+python3 test_task_move_then_rename.py \
+    TaskMoveThenRenameRegression.test_move_then_rename_only_changes_target
+```
+
+- 连续操作场景端到端覆盖：两个项目各一条标题为 `整理 API` 的任务；
+  先把项目一的目标任务从 todo 移到 doing，再改名为首尾带空白的
+  ` 修复 API `（保存为 `修复 API`）。最终只有目标任务变为标题
+  `修复 API`、状态 doing，标识与所属项目不变；另一项目的同标题任务
+  保持原标题与 todo 状态，两个项目均不新增记录。
+- 每次修改的退出码为 0、stderr 为空，stdout 为与 `task-show` 结构一致
+  的单个 JSON 任务对象（保存后的最新值）；独立命令进程的 `task-show`
+  读到与改名结果完全一致的对象，`task-list` 与 `project-stats` 继续
+  反映当前标题与状态（新标题关键词只在项目一命中，项目一统计
+  doing=1，项目二统计 todo=1）。
+- 不依赖 JSON 键序或错误文案逐字拼写；失败时打印输入、退出码、stdout、
+  stderr 及预期差异。
+
 # task-create 创建任务回归测试
 
 `test_task_create.py` 针对 `task-create <项目标识> <任务标题>`，数据准备、

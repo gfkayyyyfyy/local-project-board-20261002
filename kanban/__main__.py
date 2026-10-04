@@ -179,14 +179,17 @@ def cmd_task_create(conn, args):
           "status": "todo"})
 
 
-def cmd_task_move(conn, args):
+def update_task(conn, args, plan_change):
+    """task-move / task-rename 共用的单任务修改流程。
+
+    依次完成：解析任务标识；由 plan_change() 校验本次修改的取值并返回
+    （更新列, 新值），校验失败直接以退出码 2 拒绝；按标识定位目标任务
+    （不存在则拒绝）；仅当保存值确实变化时才写库提交；最后输出与
+    task-show 结构一致的单个任务对象（保存后的最新值）。任务标识、
+    所属项目及其余字段保持不变，不新增记录，不影响其他任务。
+    """
     task_id = parse_positive_int(args.task_id, "task id")
-    status = args.status
-    if status not in VALID_STATUSES:
-        usage_error(
-            f"invalid status {status!r}; expected one of: "
-            + ", ".join(VALID_STATUSES)
-        )
+    column, value = plan_change()
     try:
         row = conn.execute(
             "SELECT id, project_id, title, status FROM tasks WHERE id = ?",
@@ -194,34 +197,41 @@ def cmd_task_move(conn, args):
         ).fetchone()
         if row is None:
             usage_error(f"task {task_id} does not exist")
-        if row[3] != status:
-            conn.execute("UPDATE tasks SET status = ? WHERE id = ?",
-                         (status, task_id))
+        task = task_object(row)
+        if task[column] != value:
+            # column 只取自下方两个命令的内部常量（"status" / "title"）
+            conn.execute(
+                "UPDATE tasks SET " + column + " = ? WHERE id = ?",
+                (value, task_id),
+            )
             conn.commit()
+        task[column] = value
     except sqlite3.Error as exc:
         storage_error(str(exc))
-    emit({"id": row[0], "project_id": row[1], "title": row[2], "status": status})
+    emit(task)
+
+
+def cmd_task_move(conn, args):
+    def plan_change():
+        status = args.status
+        if status not in VALID_STATUSES:
+            usage_error(
+                f"invalid status {status!r}; expected one of: "
+                + ", ".join(VALID_STATUSES)
+            )
+        return "status", status
+
+    update_task(conn, args, plan_change)
 
 
 def cmd_task_rename(conn, args):
-    task_id = parse_positive_int(args.task_id, "task id")
-    title = args.title.strip()
-    if not title:
-        usage_error("task title must not be empty")
-    try:
-        row = conn.execute(
-            "SELECT id, project_id, title, status FROM tasks WHERE id = ?",
-            (task_id,),
-        ).fetchone()
-        if row is None:
-            usage_error(f"task {task_id} does not exist")
-        if row[2] != title:
-            conn.execute("UPDATE tasks SET title = ? WHERE id = ?",
-                         (title, task_id))
-            conn.commit()
-    except sqlite3.Error as exc:
-        storage_error(str(exc))
-    emit({"id": row[0], "project_id": row[1], "title": title, "status": row[3]})
+    def plan_change():
+        title = args.title.strip()
+        if not title:
+            usage_error("task title must not be empty")
+        return "title", title
+
+    update_task(conn, args, plan_change)
 
 
 def cmd_task_show(conn, args):
