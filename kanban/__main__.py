@@ -14,8 +14,9 @@
                                       无需先知道所属项目，查询不改动数据
   task-list <项目标识> [--status 状态] [--query 关键词]
       按任务标识升序列出项目任务，可按状态和标题关键词（大小写敏感的连续子串）筛选
-  project-stats <项目标识> [--query 关键词]
-      汇总项目当前各状态任务数量，可按标题关键词（大小写敏感的连续子串）筛选，
+  project-stats <项目标识> [--status 状态] [--query 关键词]
+      汇总项目当前各状态任务数量，可按状态精确匹配和标题关键词
+      （大小写敏感的连续子串）筛选，两者同时使用时取交集，
       输出 {"project_id", "total", "todo", "doing", "done"}
 
 退出码：0 成功；2 参数或业务校验失败；1 存储（数据库）失败。
@@ -321,7 +322,7 @@ def cmd_task_list(conn, args):
 
 
 def cmd_project_stats(conn, args):
-    project_id, clauses, params = prepare_task_query(args)
+    project_id, clauses, params = prepare_task_query(args, status_filter=True)
     counts = dict.fromkeys(VALID_STATUSES, 0)
     try:
         require_project(conn, project_id)
@@ -401,6 +402,10 @@ def build_parser():
 
     p = sub.add_parser("project-stats", help="汇总项目任务状态数量")
     p.add_argument("project_id", help="项目标识（正整数）")
+    p.add_argument(
+        "--status",
+        help="可选状态筛选：todo / doing / done；省略时统计全部状态",
+    )
     p.add_argument(
         "--query",
         help="可选标题关键词：去除首尾空白后按大小写敏感的连续子串匹配标题",
