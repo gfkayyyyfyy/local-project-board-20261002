@@ -187,6 +187,39 @@ python3 test_task_move_then_rename.py \
 - 不依赖 JSON 键序或错误文案逐字拼写；失败时打印输入、退出码、stdout、
   stderr 及预期差异。
 
+# task-transfer 后接 task-rename 连续修改回归测试
+
+`test_task_transfer_then_rename.py` 针对跨项目转移后继续改名的连续修改
+（先 `task-transfer` 再 `task-rename`），确认两次操作始终作用于同一条
+任务并保留转移后的归属；数据准备、修改与结果核对全部经公开命令完成
+（`project-create` / `task-create` / `task-move` / `task-transfer` /
+`task-rename` / `task-show` / `task-list`），不直接操作数据库：
+
+```bash
+python3 test_task_transfer_then_rename.py
+python3 -m unittest test_task_transfer_then_rename -v
+python3 test_task_transfer_then_rename.py \
+    TaskTransferThenRenameRegression.test_transfer_then_rename_same_task
+```
+
+- 用户指定的验收场景端到端覆盖：项目甲有 doing 的目标任务 T 和 todo 的
+  对照任务 S，项目乙有 todo 的对照任务 O，三条任务标题均为 `整理 API`；
+  先把 T 转移到乙（响应保留原标题与 doing 状态），再用 T 原标识的前导零
+  写法改名为首尾带空白的 ` 修复 API `（保存为 `修复 API`）。两次修改均
+  退出码 0、stderr 为空、stdout 为与 `task-show` 结构一致的单个 JSON
+  任务对象；改名响应标识仍为 T、所属项目仍为乙、状态仍为 doing。
+- 由新的命令进程查询同一数据库：`task-show` 与改名响应完全一致；甲的
+  列表只剩原样的 S，乙的列表包含改名后的 T 和原样的 O 且按标识升序，
+  任务总数仍为三条；按新标题筛选乙只返回 T、筛选甲返回空数组，按旧
+  标题筛选乙只返回 O。
+- 重复提交：仅首尾空白不同的同一保存标题再次提交仍成功并返回同一对象，
+  两项目的完整任务列表保持不变。
+- 拒绝路径：空字符串或纯空白标题退出码 2、stdout 为空、stderr 说明标题
+  为空且无 Python 回溯；拒绝后 T 仍属于乙并保持此前的标题和状态，S、O
+  与任务数量均不变。
+- 不依赖 JSON 键序或错误文案逐字拼写；失败时打印输入参数、实际退出码、
+  stdout、stderr 及预期结果。
+
 # task-create 创建任务回归测试
 
 `test_task_create.py` 针对 `task-create <项目标识> <任务标题>`，数据准备、
