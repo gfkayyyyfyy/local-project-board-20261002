@@ -179,14 +179,18 @@ def cmd_task_create(conn, args):
           "status": "todo"})
 
 
-def cmd_task_move(conn, args):
-    task_id = parse_positive_int(args.task_id, "task id")
-    status = args.status
-    if status not in VALID_STATUSES:
-        usage_error(
-            f"invalid status {status!r}; expected one of: "
-            + ", ".join(VALID_STATUSES)
-        )
+# 单任务修改流程允许更新的字段：字段名 -> 在任务行 (id, project_id, title,
+#  status) 中的下标。仅接受此处列出的内部常量，不来自外部输入。
+_TASK_UPDATABLE_FIELDS = {"title": 2, "status": 3}
+
+
+def update_task(conn, task_id, field, value):
+    """task-move / task-rename 共用的单任务修改流程。
+
+    按跨项目唯一标识定位任务（不存在则按业务校验失败退出）；保存值与目标值
+    不同时才更新指定字段并提交，相同则不写库。返回保存后的完整任务行
+    (id, project_id, title, status)，标识与所属项目始终不变。
+    """
     try:
         row = conn.execute(
             "SELECT id, project_id, title, status FROM tasks WHERE id = ?",
@@ -194,13 +198,23 @@ def cmd_task_move(conn, args):
         ).fetchone()
         if row is None:
             usage_error(f"task {task_id} does not exist")
-        if row[3] != status:
-            conn.execute("UPDATE tasks SET status = ? WHERE id = ?",
-                         (status, task_id))
+        saved = list(row)
+        index = _TASK_UPDATABLE_FIELDS[field]
+        if saved[index] != value:
+            conn.execute(
+                f"UPDATE tasks SET {field} = ? WHERE id = ?", (value, task_id)
+            )
             conn.commit()
+            saved[index] = value
     except sqlite3.Error as exc:
         storage_error(str(exc))
-    emit({"id": row[0], "project_id": row[1], "title": row[2], "status": status})
+    return tuple(saved)
+
+
+def cmd_task_move(conn, args):
+    task_id = parse_positive_int(args.task_id, "task id")
+    status = validate_status(args.status)
+    emit(task_object(update_task(conn, task_id, "status", status)))
 
 
 def cmd_task_rename(conn, args):
@@ -208,20 +222,7 @@ def cmd_task_rename(conn, args):
     title = args.title.strip()
     if not title:
         usage_error("task title must not be empty")
-    try:
-        row = conn.execute(
-            "SELECT id, project_id, title, status FROM tasks WHERE id = ?",
-            (task_id,),
-        ).fetchone()
-        if row is None:
-            usage_error(f"task {task_id} does not exist")
-        if row[2] != title:
-            conn.execute("UPDATE tasks SET title = ? WHERE id = ?",
-                         (title, task_id))
-            conn.commit()
-    except sqlite3.Error as exc:
-        storage_error(str(exc))
-    emit({"id": row[0], "project_id": row[1], "title": title, "status": row[3]})
+    emit(task_object(update_task(conn, task_id, "title", title)))
 
 
 def cmd_task_show(conn, args):
