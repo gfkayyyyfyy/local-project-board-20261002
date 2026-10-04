@@ -127,6 +127,38 @@ def require_project(conn, project_id):
         usage_error(f"project {project_id} does not exist")
 
 
+def normalize_query(raw):
+    """归一化标题关键词（task-list 与 project-stats 共用同一规则）。
+
+    省略 --query 时返回 None；否则去除首尾空白（保留内部空白），空字符串或
+    纯空白按参数错误处理。
+    """
+    if raw is None:
+        return None
+    keyword = raw.strip()
+    if not keyword:
+        usage_error("query keyword must not be empty")
+    return keyword
+
+
+def build_task_filters(project_id, keyword, status=None):
+    """构造项目任务查询共用的 WHERE 片段与绑定参数。
+
+    始终限定 project_id；status 非空时追加状态精确匹配；keyword 非空时追加
+    标题条件。INSTR 为大小写敏感的连续子串匹配，中文、%、_、引号等均按普通
+    字符处理，只匹配标题不匹配项目名称。
+    """
+    clauses = ["project_id = ?"]
+    params = [project_id]
+    if status is not None:
+        clauses.append("status = ?")
+        params.append(status)
+    if keyword is not None:
+        clauses.append("INSTR(title, ?) > 0")
+        params.append(keyword)
+    return clauses, params
+
+
 def cmd_task_create(conn, args):
     project_id = parse_positive_int(args.project_id, "project id")
     title = args.title.strip()
@@ -206,26 +238,14 @@ def cmd_task_show(conn, args):
 
 def cmd_task_list(conn, args):
     project_id = parse_positive_int(args.project_id, "project id")
-    query = args.query
-    if query is not None:
-        query = query.strip()
-        if not query:
-            usage_error("query keyword must not be empty")
+    keyword = normalize_query(args.query)
     status = args.status
     if status is not None and status not in VALID_STATUSES:
         usage_error(
             f"invalid status {status!r}; expected one of: "
             + ", ".join(VALID_STATUSES)
         )
-    clauses = ["project_id = ?"]
-    params = [project_id]
-    if status is not None:
-        clauses.append("status = ?")
-        params.append(status)
-    if query is not None:
-        # INSTR 为大小写敏感的连续子串匹配，%、_、引号等均按普通字符处理
-        clauses.append("INSTR(title, ?) > 0")
-        params.append(query)
+    clauses, params = build_task_filters(project_id, keyword, status)
     try:
         require_project(conn, project_id)
         rows = conn.execute(
@@ -240,18 +260,8 @@ def cmd_task_list(conn, args):
 
 def cmd_project_stats(conn, args):
     project_id = parse_positive_int(args.project_id, "project id")
-    query = args.query
-    if query is not None:
-        query = query.strip()
-        if not query:
-            usage_error("query keyword must not be empty")
-    clauses = ["project_id = ?"]
-    params = [project_id]
-    if query is not None:
-        # 与 task-list 一致：INSTR 为大小写敏感的连续子串匹配，
-        # %、_、引号等均按普通字符处理，只匹配标题不匹配项目名称
-        clauses.append("INSTR(title, ?) > 0")
-        params.append(query)
+    keyword = normalize_query(args.query)
+    clauses, params = build_task_filters(project_id, keyword)
     counts = dict.fromkeys(VALID_STATUSES, 0)
     try:
         require_project(conn, project_id)
