@@ -296,6 +296,39 @@ python3 test_task_transfer.py \
 - 不依赖 JSON 键序或错误文案逐字拼写；失败时打印命令行输入、实际退出码、
   stdout、stderr 及预期差异。
 
+# task-transfer 后组合筛选回归测试
+
+`test_task_transfer_filters.py` 针对跨项目转移前后
+`--status todo --status doing --query " API "` 组合筛选（两状态并集再与
+标题关键词取交集）下的 `task-list` 与 `project-stats` 结果，数据准备、
+转移与核对全部经公开命令完成（`project-create` / `task-create` /
+`task-move` / `task-transfer` / `task-list` / `project-stats` /
+`task-show` / `project-list`），不直接写数据库：
+
+```bash
+python3 test_task_transfer_filters.py
+python3 -m unittest test_task_transfer_filters -v
+python3 test_task_transfer_filters.py \
+    TaskTransferFilterRegression.test_acceptance_ownership_change_updates_combined_filter
+```
+
+- 用户指定的固定场景：源项目有两条 `Fix API`（doing、todo）、一条 doing 的
+  `Fix api` 与一条 done 的 `Docs`，目标项目已有一条 todo 的 `Fix API`。
+  转移前源项目组合筛选命中两条（total=2/todo=1/doing=1/done=0），目标项目
+  只命中一条 todo；把源项目 doing 的 `Fix API` 转入目标项目后，源项目只命中
+  原来的 todo，目标项目命中两条（total=2/todo=1/doing=1/done=0）。列表按
+  任务标识升序，同标题任务各自保留，小写 `api` 与 `Docs` 均不进入结果。
+- 转移响应与随后独立进程的 `task-show` 对象一致：标识、标题、状态不变，
+  仅 `project_id` 变为目标项目；其他任务完整对象与项目名称保持原值；
+  成功调用退出码 0、stderr 为空、stdout 只有一个可解析 JSON 值；
+  重复查询结果逐字节一致且不改动数据。
+- 重复转移到当前所属项目成功返回原任务，组合筛选列表与统计（连同完整列表、
+  项目名称）均不变；转移到确定不存在的项目退出码 2、stdout 为空、stderr
+  说明项目不存在且无 Python 回溯，前后完整任务列表与筛选统计完全相同。
+- 断言只使用创建时返回的标识，不依赖 JSON 键序或错误文案逐字一致；失败时
+  打印命令输入、退出码、stdout、stderr 与预期结果。每个用例使用独立临时
+  数据库，结束后自动清理。
+
 # project-create 创建项目回归测试
 `test_project_create.py` 针对 `project-create <项目名称>`，数据准备、创建与
 结果核对全部经公开命令完成（`project-create` / `task-create` / `task-move` /
