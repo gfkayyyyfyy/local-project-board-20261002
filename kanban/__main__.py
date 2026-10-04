@@ -39,6 +39,12 @@
       状态，多个状态取并集，再与项目范围及标题关键词条件取交集；
       省略 --status 时统计全部状态，
       输出 {"project_id", "total", "todo", "doing", "done"}
+  project-export <项目标识>
+      一次导出单个项目及其全部任务，输出 {"project", "tasks"}：project 采用
+      project-list 中的单个项目结构（{"id", "name"}），tasks 为该项目全部
+      todo/doing/done 任务的数组，元素采用 task-list 中的任务结构，按任务
+      标识数值升序；同标题任务各自保留，其他项目任务不混入，存在但无任务的
+      项目返回 project 对象与空数组；只读，不改动任何数据
 
 退出码：0 成功；2 参数或业务校验失败；1 存储（数据库）失败。
 """
@@ -462,6 +468,30 @@ def cmd_project_stats(conn, args):
     })
 
 
+def cmd_project_export(conn, args):
+    project_id = parse_positive_int(args.project_id, "project id")
+    try:
+        project_row = conn.execute(
+            "SELECT id, name FROM projects WHERE id = ?", (project_id,)
+        ).fetchone()
+        if project_row is None:
+            usage_error(f"project {project_id} does not exist")
+        task_rows = conn.execute(
+            "SELECT id, project_id, title, status FROM tasks "
+            "WHERE project_id = ? ORDER BY id ASC",
+            (project_id,),
+        ).fetchall()
+    except sqlite3.Error as exc:
+        storage_error(str(exc))
+    # 只读导出：项目对象沿用 project-list 的单项目结构，任务对象沿用
+    # task-list 的任务结构并按任务标识数值升序；只取本项目任务，其他项目
+    # （即使同标题）不混入，空项目返回空数组
+    emit({
+        "project": {"id": project_row[0], "name": project_row[1]},
+        "tasks": [task_object(row) for row in task_rows],
+    })
+
+
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="kanban", description="本地项目任务看板（SQLite 存储）"
@@ -566,6 +596,10 @@ def build_parser():
         help="可选标题关键词：去除首尾空白后按大小写敏感的连续子串匹配标题",
     )
     p.set_defaults(func=cmd_project_stats)
+
+    p = sub.add_parser("project-export", help="导出单个项目及其全部任务")
+    p.add_argument("project_id", help="项目标识（正整数，允许前导零）")
+    p.set_defaults(func=cmd_project_export)
 
     return parser
 
