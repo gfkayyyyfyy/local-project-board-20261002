@@ -12,7 +12,10 @@
       在 todo/doing/done 之间移动任务；可选 --from 指定本次移动预期的
       当前状态，仅当任务已保存的状态与 --from 完全相同时才设置目标状态，
       省略 --from 时三种合法状态之间可直接转换
-  task-rename <任务标识> <新标题>     修改任务标题，保留标识、所属项目与状态
+  task-rename <任务标识> <新标题> [--from <预期原标题>]
+      修改任务标题，保留标识、所属项目与状态；可选 --from 指定本次改名
+      预期的当前标题（去除首尾空白后与已保存标题逐字比较），仅当完全
+      相等时才保存新标题，省略 --from 时不检查原标题
   task-show <任务标识>               按跨项目唯一的任务标识读取单条任务，
                                       无需先知道所属项目，查询不改动数据
   task-transfer <任务标识> <目标项目标识> [--from <来源项目标识>]
@@ -199,8 +202,8 @@ def update_task(conn, args, plan_change, check_current=None):
     依次完成：解析任务标识；由 plan_change() 校验本次修改的取值并返回
     （更新列, 新值），校验失败直接以退出码 2 拒绝；按标识定位目标任务
     （不存在则拒绝）；若提供 check_current()，再用已保存的任务对象做
-    一次业务校验（如 task-move --from 的预期当前状态、task-transfer
-    的目标项目存在性），不满足则以
+    一次业务校验（如 task-move --from 的预期当前状态、task-rename
+    --from 的预期原标题、task-transfer 的目标项目存在性），不满足则以
     退出码 2 拒绝且不写库；仅当保存值确实变化时才写库提交；最后输出与
     task-show 结构一致的单个任务对象（保存后的最新值）。除本次修改的
     字段外，任务标识与其余字段保持不变，不新增记录，不影响其他任务。
@@ -260,13 +263,34 @@ def cmd_task_move(conn, args):
 
 
 def cmd_task_rename(conn, args):
+    expected = {}
+
     def plan_change():
         title = args.title.strip()
         if not title:
             usage_error("task title must not be empty")
+        # --from 与新标题一样先去除首尾空白（内部空白、大小写、中文、
+        # %、_、引号等原样保留），去空白后为空则按参数错误拒绝
+        if args.from_title is not None:
+            from_title = args.from_title.strip()
+            if not from_title:
+                usage_error("--from title must not be empty")
+            expected["title"] = from_title
+        else:
+            expected["title"] = None
         return "title", title
 
-    update_task(conn, args, plan_change)
+    def check_current(task):
+        # 提供 --from 时，处理后的预期标题只有与已保存标题逐字相等才允许
+        # 改名，不作模糊匹配；新标题与当前标题相同但预期不匹配时同样拒绝
+        from_title = expected["title"]
+        if from_title is not None and task["title"] != from_title:
+            usage_error(
+                f"task {task['id']} current title is {task['title']!r}, "
+                f"but --from expected {from_title!r}"
+            )
+
+    update_task(conn, args, plan_change, check_current)
 
 
 def cmd_task_show(conn, args):
@@ -463,6 +487,13 @@ def build_parser():
     p = sub.add_parser("task-rename", help="修改任务标题")
     p.add_argument("task_id", help="任务标识（正整数）")
     p.add_argument("title", help="新任务标题")
+    p.add_argument(
+        "--from",
+        dest="from_title",
+        metavar="TITLE",
+        help="可选的预期当前标题：去除首尾空白后与任务已保存的标题逐字比较，"
+             "仅当完全相等时才保存新标题；省略时不检查原标题",
+    )
     p.set_defaults(func=cmd_task_rename)
 
     p = sub.add_parser("task-show", help="按标识读取单条任务")
