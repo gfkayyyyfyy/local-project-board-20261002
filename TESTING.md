@@ -296,6 +296,44 @@ python3 test_task_transfer.py \
 - 不依赖 JSON 键序或错误文案逐字拼写；失败时打印命令行输入、实际退出码、
   stdout、stderr 及预期差异。
 
+# task-transfer --from 预期来源项目回归测试
+
+`test_task_transfer_from.py` 针对
+`task-transfer <任务标识> <目标项目标识> [--from <来源项目标识>]` 的来源
+归属校验，数据准备、转移与结果核对全部经公开命令完成（`project-create` /
+`task-create` / `task-move` / `task-transfer` / `task-show` / `task-list`
+/ `project-stats` / `project-list`），不直接读写数据库，运行方式同其他回归：
+
+```bash
+python3 test_task_transfer_from.py
+python3 -m unittest test_task_transfer_from -v
+python3 test_task_transfer_from.py \
+    TaskTransferFromRegression.test_acceptance_match_then_repeat_conflicts
+```
+
+- 用户指定的验收场景端到端覆盖：标识 1、2 的两个项目各有一条标题为
+  `整理 API` 的任务，项目 1 的任务 1 为 doing、项目 2 的任务 2 为 todo；
+  `task-transfer 1 2 --from 0001` 退出码 0、stderr 为空、stdout 为只含
+  `id` / `project_id` / `title` / `status` 的任务 1 对象，仅 `project_id`
+  变为 2、标识/标题/doing 原样；再次执行同一命令退出码 2、stdout 为空、
+  stderr 同时指出当前项目 2 与预期项目 1，任务 1 仍属于项目 2、任务 2 与
+  两个项目名称不变；随后的 `task-show`、`task-list`、`project-stats`
+  按新归属返回或统计（项目 1 统计全 0，项目 2 total=2、todo=1、doing=1），
+  重复失败不改变查询结果。
+- 即使目标项目就是当前所属项目仍检查来源：`--from` 与当前归属相符时成功
+  返回原任务、不新增记录；不符时退出码 2 且不写库。标识允许前导零
+  （`0001`/`0002` 与数值等价）。
+- 合法却不存在的预期来源（如 `999`、上限值本身）按归属不匹配拒绝，stderr
+  同时给出当前项目与预期项目标识，且不创建该项目；来源合法但与当前归属
+  不同时不转移、不复制、不新增任务或项目。
+- 原样拼写与边界：空字符串、纯空白、`0`/全零、负数、非数字、带小数点、
+  首尾空白、`9223372036854775808` 越界及 `--from` 缺值均退出码 2、
+  stdout 为空、stderr 说明来源项目标识非法且无回溯；任务不存在、目标项目
+  不存在同样退出码 2 并说明不存在。
+- 省略 `--from` 时保留现有转移规则：可直接跨项目转移、原地转移成功、
+  目标项目不存在时按原规则拒绝；数据库无法打开时退出码 1、stdout 为空、
+  stderr 含 `storage failure`。
+
 # project-create 创建项目回归测试
 `test_project_create.py` 针对 `project-create <项目名称>`，数据准备、创建与
 结果核对全部经公开命令完成（`project-create` / `task-create` / `task-move` /

@@ -15,10 +15,14 @@
   task-rename <任务标识> <新标题>     修改任务标题，保留标识、所属项目与状态
   task-show <任务标识>               按跨项目唯一的任务标识读取单条任务，
                                       无需先知道所属项目，查询不改动数据
-  task-transfer <任务标识> <目标项目标识>
+  task-transfer <任务标识> <目标项目标识> [--from <来源项目标识>]
       将单条任务转移到已有项目：只凭跨项目唯一的任务标识定位任务，
       仅修改所属项目，任务标识、标题、状态原样保留；目标就是当前所属
-      项目时仍成功返回原任务，不新增记录，不复制任务，不创建项目
+      项目时仍成功返回原任务，不新增记录，不复制任务，不创建项目。
+      可选 --from 确认任务当前仍属于指定来源项目：提供后仅当任务当前
+      所属项目按数值等于该来源标识时才允许转移，否则拒绝；来源项目
+      合法但不存在同样按归属不匹配拒绝，不创建该项目；省略 --from 时
+      保留不加来源校验的现有转移规则
   task-list <项目标识> [--status 状态]... [--query 关键词]
       按任务标识升序列出项目任务，可按状态和标题关键词（大小写敏感的连续子串）
       筛选；--status 可在同一次调用中重复传入，每次接收一个状态，多个状态取并集，
@@ -198,7 +202,7 @@ def update_task(conn, args, plan_change, check_current=None):
     （更新列, 新值），校验失败直接以退出码 2 拒绝；按标识定位目标任务
     （不存在则拒绝）；若提供 check_current()，再用已保存的任务对象做
     一次业务校验（如 task-move --from 的预期当前状态、task-transfer
-    的目标项目存在性），不满足则以
+    --from 的预期来源项目与目标项目存在性），不满足则以
     退出码 2 拒绝且不写库；仅当保存值确实变化时才写库提交；最后输出与
     task-show 结构一致的单个任务对象（保存后的最新值）。除本次修改的
     字段外，任务标识与其余字段保持不变，不新增记录，不影响其他任务。
@@ -282,16 +286,33 @@ def cmd_task_show(conn, args):
 
 
 def cmd_task_transfer(conn, args):
-    target = {}
+    plan = {}
 
     def plan_change():
-        target["project_id"] = parse_positive_int(args.project_id, "project id")
-        return "project_id", target["project_id"]
+        target_id = parse_positive_int(args.project_id, "project id")
+        plan["target_id"] = target_id
+        # --from 省略时为 None，保留不加来源校验的现有转移规则；
+        # 提供时沿用正整数标识规则（只接受 ASCII 数字、允许前导零、
+        # 按数值判断 1..SQLITE_MAX_INT）
+        if args.from_project is not None:
+            plan["expected_project_id"] = parse_positive_int(
+                args.from_project, "source project id"
+            )
+        return "project_id", target_id
 
     def check_current(task):
+        expected_id = plan.get("expected_project_id")
+        if expected_id is not None and task["project_id"] != expected_id:
+            # 仅当任务当前所属项目与 --from 按数值相等时才允许转移；
+            # 预期来源合法但不存在时同样按归属不匹配拒绝（不创建该项目）。
+            # 目标就是当前所属项目时仍先做此校验：来源相符才成功返回原任务。
+            usage_error(
+                f"task {task['id']} is currently in project "
+                f"{task['project_id']}, but --from expected project {expected_id}"
+            )
         # 目标项目必须已存在；目标就是当前所属项目时同样成功，
         # 由 update_task 跳过实际写入，不新增记录
-        require_project(conn, target["project_id"])
+        require_project(conn, plan["target_id"])
 
     update_task(conn, args, plan_change, check_current)
 
@@ -455,6 +476,14 @@ def build_parser():
     p = sub.add_parser("task-transfer", help="将任务转移到已有项目")
     p.add_argument("task_id", help="任务标识（正整数，允许前导零）")
     p.add_argument("project_id", help="目标项目标识（正整数，允许前导零）")
+    p.add_argument(
+        "--from",
+        dest="from_project",
+        metavar="PROJECT_ID",
+        help="可选的预期来源项目标识（正整数，允许前导零）：提供后仅当任务"
+             "当前所属项目与之按数值相等时才转移；合法但不存在同样拒绝且不"
+             "创建项目；省略时保留不加来源校验的现有转移规则",
+    )
     p.set_defaults(func=cmd_task_transfer)
 
     p = sub.add_parser("task-list", help="列出项目任务")
