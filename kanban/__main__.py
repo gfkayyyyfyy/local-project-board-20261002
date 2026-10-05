@@ -39,12 +39,14 @@
       状态，多个状态取并集，再与项目范围及标题关键词条件取交集；
       省略 --status 时统计全部状态，
       输出 {"project_id", "total", "todo", "doing", "done"}
-  project-export <项目标识>
-      一次导出单个项目及其全部任务，输出 {"project", "tasks"}：project 采用
-      project-list 中的单个项目结构（{"id", "name"}），tasks 为该项目全部
+  project-export <项目标识> [--query 关键词]
+      一次导出单个项目及其任务，输出 {"project", "tasks"}：project 采用
+      project-list 中的单个项目结构（{"id", "name"}），tasks 为该项目
       todo/doing/done 任务的数组，元素采用 task-list 中的任务结构，按任务
-      标识数值升序；同标题任务各自保留，其他项目任务不混入，存在但无任务的
-      项目返回 project 对象与空数组；只读，不改动任何数据
+      标识数值升序；可选 --query 按标题关键词（大小写敏感的连续子串）筛选，
+      省略时导出全部任务；同标题任务各自保留，其他项目任务不混入，存在但
+      无任务（或筛选后无命中）的项目返回 project 对象与空数组；只读，不改动
+      任何数据
 
 退出码：0 成功；2 参数或业务校验失败；1 存储（数据库）失败。
 """
@@ -362,13 +364,13 @@ def cmd_task_transfer(conn, args):
 
 
 def normalize_query(raw):
-    """规范化 --query 关键词（task-list、project-stats、project-list 共用）。
+    """规范化 --query 关键词（task-list、project-stats、project-list、project-export 共用）。
 
     省略 --query 时返回 None，表示不加关键词条件；否则去除首尾空白（保留内部
     空白），去空白后为空则按参数错误拒绝。匹配阶段使用 INSTR 做大小写敏感
-    的连续子串匹配，因此中文、%、_、引号等均为普通字符；task-list 与
-    project-stats 只匹配任务标题（不匹配项目名称），project-list 只匹配
-    项目名称（不匹配任务标题）。
+    的连续子串匹配，因此中文、%、_、引号等均为普通字符；task-list、
+    project-stats 与 project-export 只匹配任务标题（不匹配项目名称），
+    project-list 只匹配项目名称（不匹配任务标题）。
     """
     if raw is None:
         return None
@@ -470,6 +472,8 @@ def cmd_project_stats(conn, args):
 
 def cmd_project_export(conn, args):
     project_id = parse_positive_int(args.project_id, "project id")
+    keyword = normalize_query(args.query)
+    clauses, params = task_query_conditions(project_id, keyword)
     try:
         project_row = conn.execute(
             "SELECT id, name FROM projects WHERE id = ?", (project_id,)
@@ -478,8 +482,8 @@ def cmd_project_export(conn, args):
             usage_error(f"project {project_id} does not exist")
         task_rows = conn.execute(
             "SELECT id, project_id, title, status FROM tasks "
-            "WHERE project_id = ? ORDER BY id ASC",
-            (project_id,),
+            "WHERE " + " AND ".join(clauses) + " ORDER BY id ASC",
+            params,
         ).fetchall()
     except sqlite3.Error as exc:
         storage_error(str(exc))
@@ -597,8 +601,13 @@ def build_parser():
     )
     p.set_defaults(func=cmd_project_stats)
 
-    p = sub.add_parser("project-export", help="导出单个项目及其全部任务")
+    p = sub.add_parser("project-export", help="导出单个项目及其任务")
     p.add_argument("project_id", help="项目标识（正整数，允许前导零）")
+    p.add_argument(
+        "--query",
+        help="可选标题关键词：去除首尾空白后按大小写敏感的连续子串匹配标题，"
+             "省略时导出该项目全部任务",
+    )
     p.set_defaults(func=cmd_project_export)
 
     return parser
